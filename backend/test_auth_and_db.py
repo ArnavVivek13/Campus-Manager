@@ -44,9 +44,11 @@ def test_full_system():
     assert room_count >= 5, "Rooms should be seeded"
 
     # 2. Test User Registration (Disabled publicly, provisioned by Admin)
+    import uuid
+    rand_email = f"new.faculty.{uuid.uuid4().hex[:6]}@cit.edu"
     print("\n[2] Testing Registration Protection (/api/auth/register)...")
     reg_payload = {
-        "email": "new.faculty@cit.edu",
+        "email": rand_email,
         "password": "SecurePassword@123",
         "full_name": "Prof. Ananya Sen",
         "role": "FACULTY",
@@ -67,7 +69,7 @@ def test_full_system():
     # 3. Test Standard Login
     print("\n[3] Testing Standard Login (/api/auth/login)...")
     login_payload = {
-        "email": "new.faculty@cit.edu",
+        "email": rand_email,
         "password": "SecurePassword@123"
     }
     r = client.post("/api/auth/login", json=login_payload)
@@ -82,7 +84,7 @@ def test_full_system():
     r = client.get("/api/auth/me", headers={"Authorization": f"Bearer {faculty_token}"})
     assert r.status_code == 200, f"/api/auth/me failed: {r.text}"
     me = r.json()
-    assert me["email"] == "new.faculty@cit.edu"
+    assert me["email"] == rand_email
     assert me["full_name"] == "Prof. Ananya Sen"
     print(f"  [OK] Profile retrieved for: {me['full_name']} ({me['role']})")
 

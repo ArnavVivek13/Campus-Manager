@@ -192,7 +192,24 @@ def test_booking_duplicate_prevention_and_approval():
     assert slot_res.status_code == 409
     assert "Slot collision" in slot_res.json()["detail"]
 
-    # 4. Admin approves original booking
+    # 4. Admin offers alternative with a specific room
+    alt_res = client.post(
+        f"/api/db/bookings/{b1_id}/action",
+        json={"action": "alternative", "assigned_room": "SH-2", "reason": "Shifted to SH-2 due to sound checks"},
+        headers=admin_headers
+    )
+    assert alt_res.status_code == 200
+    assert alt_res.json()["current_status"] == "alternative_offered"
+
+    # 5. Admin approves booking
     action_res = client.post(f"/api/db/bookings/{b1_id}/action", json={"action": "approve"}, headers=admin_headers)
     assert action_res.status_code == 200
     assert action_res.json()["current_status"] == "approved"
+
+    # 6. Verify /api/fest/bookings authoritative sync
+    fest_res = client.get("/api/fest/bookings")
+    assert fest_res.status_code == 200
+    fest_items = fest_res.json()["bookings"]
+    matching = [x for x in fest_items if x["request"]["id"] == b1_id]
+    assert len(matching) > 0
+    assert matching[0]["status"] == "approved"

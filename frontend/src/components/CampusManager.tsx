@@ -102,6 +102,7 @@ const fmt = (h: number) => `${String(Math.floor(h)).padStart(2, '0')}:${String(M
 type Detail = {
   id?: string
   type?: 'session' | 'booking' | 'exam'
+  status?: string
   kicker: string
   title: string
   hueCls: string
@@ -126,13 +127,14 @@ const sessionDetail = (s: Session): Detail => ({
 const bookingDetail = (r: string[]): Detail => ({
   id: r[0] ?? '',
   type: 'booking',
+  status: r[5] ?? '',
   kicker: 'Booking detail',
   title: r[1] ?? '',
-  hueCls: hue[r[5] === 'Approved' ? 'mint' : r[5] === 'Rejected' ? 'rose' : 'peach'],
+  hueCls: hue[r[5] === 'Approved' ? 'mint' : r[5] === 'Rejected' ? 'rose' : r[5] === 'Alternative Offered' ? 'peach' : 'violet'],
   line1: `${r[0] ?? ''} · ${r[5] ?? ''}`,
   line2: r[3] ?? '',
   fields: [['Requested by', r[2] ?? ''], ['Requested slot', r[3] ?? ''], ['Assigned venue', r[4] ?? ''], ['Status', r[5] ?? '']],
-  note: r[5] === 'Approved' ? 'Approved after scoring against venue capacity, equipment needs, and clash checks.' : r[5] === 'Rejected' ? 'Rejected: no venue satisfies the capacity and equipment requirements for the requested slot.' : 'The requested slot clashes with an existing booking, so the closest available alternative was offered.',
+  note: r[5] === 'Approved' ? 'Approved after scoring against venue capacity, equipment needs, and clash checks.' : r[5] === 'Rejected' ? 'Rejected: no venue satisfies the capacity and equipment requirements for the requested slot.' : r[5] === 'Alternative Offered' ? 'The requested slot clashed with an existing booking, so an alternative venue was offered.' : 'Awaiting administrator or coordinator review.',
 })
 
 const examDetail = (e: string[]): Detail => ({
@@ -188,6 +190,10 @@ export default function CampusManager() {
     start_time: '18:00',
     requested_room: 'AUD'
   })
+  const [altVenueInput, setAltVenueInput] = useState('')
+  const [altReasonInput, setAltReasonInput] = useState('')
+  const [showAltBox, setShowAltBox] = useState(false)
+  const [editingDecision, setEditingDecision] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Live Backend State - Initialized empty by default as requested
@@ -529,7 +535,12 @@ export default function CampusManager() {
     }
   }
 
-  const handleBookingAction = async (bookingId: string, action: 'approve' | 'reject') => {
+  const handleBookingAction = async (
+    bookingId: string,
+    action: 'approve' | 'reject' | 'alternative',
+    assignedRoom?: string,
+    reason?: string
+  ) => {
     try {
       const token = localStorage.getItem('auth_token')
       const res = await fetch(`${API_BASE}/api/db/bookings/${bookingId}/action`, {
@@ -538,19 +549,31 @@ export default function CampusManager() {
           'Content-Type': 'application/json',
           ...(token ? { 'Authorization': `Bearer ${token}` } : {})
         },
-        body: JSON.stringify({ action })
+        body: JSON.stringify({
+          action,
+          ...(assignedRoom ? { assigned_room: assignedRoom } : {}),
+          ...(reason ? { reason } : {})
+        })
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || `Failed to ${action} booking`)
-      showToast(`Booking ${bookingId} ${action === 'approve' ? 'approved' : 'rejected'}!`, 'success')
+      const actionLabel = action === 'approve' ? 'Approved' : action === 'alternative' ? 'Alternative Offered' : 'Rejected'
+      showToast(`Booking ${bookingId} ${actionLabel}!`, 'success')
       fetchBookings()
+      setEditingDecision(false)
+      setShowAltBox(false)
       if (selected && selected.id === bookingId) {
         setSelected(prev => prev ? {
           ...prev,
-          line1: `${bookingId} · ${action === 'approve' ? 'Approved' : 'Rejected'}`,
-          hueCls: hue[action === 'approve' ? 'mint' : 'rose'],
-          fields: prev.fields.map(([k, v]) => k === 'Status' ? [k, action === 'approve' ? 'Approved' : 'Rejected'] : [k, v]),
-          note: data.reason || `Status updated to ${action}.`
+          status: actionLabel,
+          line1: `${bookingId} · ${actionLabel}`,
+          hueCls: hue[action === 'approve' ? 'mint' : action === 'alternative' ? 'peach' : 'rose'],
+          fields: prev.fields.map(([k, v]) => {
+            if (k === 'Status') return [k, actionLabel]
+            if (k === 'Assigned venue' && assignedRoom) return [k, assignedRoom]
+            return [k, v]
+          }),
+          note: data.reason || `Status updated to ${actionLabel}.`
         } : null)
       }
     } catch (err: any) {
@@ -1286,38 +1309,158 @@ export default function CampusManager() {
     </div>
 
     {selected && <aside className="fixed inset-y-0 right-0 z-20 w-full max-w-md border-l border-timetable-grid bg-card p-6 shadow-2xl">
-      <div className="flex items-start justify-between"><div><p className="text-xs text-muted-foreground">{selected.kicker}</p><h3 className="mt-1 text-xl font-semibold">{selected.title}</h3></div><button onClick={() => setSelected(null)} className="rounded-full p-2 hover:bg-accent" aria-label="Close"><X className="size-4" /></button></div>
+      <div className="flex items-start justify-between"><div><p className="text-xs text-muted-foreground">{selected.kicker}</p><h3 className="mt-1 text-xl font-semibold">{selected.title}</h3></div><button onClick={() => { setSelected(null); setEditingDecision(false); setShowAltBox(false); }} className="rounded-full p-2 hover:bg-accent" aria-label="Close"><X className="size-4" /></button></div>
       <div className={`mt-5 rounded-none border border-timetable-grid p-4 ${selected.hueCls}`}><p className="text-sm font-medium">{selected.line1}</p><p className="mt-1 text-sm opacity-80">{selected.line2}</p></div>
       <div className="mt-4 grid grid-cols-2 gap-3">{selected.fields.map(([l, v]) => <div key={l} className="rounded-none border border-timetable-grid bg-muted p-3"><p className="text-[11px] text-muted-foreground">{l}</p><p className="mt-1 text-sm font-medium">{v}</p></div>)}</div>
       <div className="mt-4 rounded-lg border border-timetable-grid p-4 text-sm leading-6 text-muted-foreground"><Sparkles className="mb-2 size-4 text-foreground" />{selected.note}</div>
 
       {/* Admin / Coordinator Approval Actions for Booking Proposals */}
-      {selected.type === 'booking' && (userRole === 'ADMIN' || userRole === 'DEPARTMENT_COORDINATOR') && (
-        <div className="mt-4 pt-4 border-t border-timetable-grid flex flex-col gap-2">
-          <p className="text-xs font-semibold text-foreground uppercase tracking-wide">Review Proposal</p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => handleBookingAction(selected.id ?? '', 'approve')}
-              className="flex-1 flex items-center justify-center gap-1.5 rounded-full bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 transition shadow-sm"
-            >
-              <Check className="size-3.5" />
-              Approve Booking
-            </button>
-            <button
-              onClick={() => handleBookingAction(selected.id ?? '', 'reject')}
-              className="flex-1 flex items-center justify-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-600 hover:text-white transition shadow-sm"
-            >
-              <X className="size-3.5" />
-              Reject
-            </button>
-          </div>
-        </div>
-      )}
+      {selected.type === 'booking' && (userRole === 'ADMIN' || userRole === 'DEPARTMENT_COORDINATOR') && (() => {
+        const isPending = !selected.status || selected.status === 'Pending Approval' || selected.status === 'pending'
+        const shouldShowActions = isPending || editingDecision
 
-      <button onClick={handleAskAiExplain} disabled={aiLoading} className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 text-sm font-medium text-ink-foreground hover:opacity-90 disabled:opacity-50">
-        {aiLoading ? <Loader2 className="size-4 animate-spin" /> : <Bot className="size-4" />}
-        Ask AI: Why is this placed here?
-      </button>
+        if (shouldShowActions) {
+          return (
+            <div className="mt-4 pt-4 border-t border-timetable-grid flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-foreground uppercase tracking-wide">
+                  {editingDecision ? 'Change Decision' : 'Review Proposal'}
+                </p>
+                {editingDecision && (
+                  <button
+                    type="button"
+                    onClick={() => { setEditingDecision(false); setShowAltBox(false); }}
+                    className="text-xs text-muted-foreground hover:text-foreground underline"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleBookingAction(selected.id ?? '', 'approve')}
+                  className="flex items-center justify-center gap-1.5 rounded-full bg-emerald-600 px-2.5 py-2 text-xs font-medium text-white hover:bg-emerald-700 transition shadow-sm"
+                >
+                  <Check className="size-3.5 shrink-0" />
+                  <span>Approve</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAltBox(prev => !prev)}
+                  className={`flex items-center justify-center gap-1.5 rounded-full border px-2.5 py-2 text-xs font-medium transition shadow-sm ${
+                    showAltBox
+                      ? 'bg-amber-600 text-white border-amber-600'
+                      : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400 hover:bg-amber-600 hover:text-white'
+                  }`}
+                >
+                  <Clock3 className="size-3.5 shrink-0" />
+                  <span>Alternative</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBookingAction(selected.id ?? '', 'reject')}
+                  className="flex items-center justify-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-2.5 py-2 text-xs font-medium text-rose-600 hover:bg-rose-600 hover:text-white transition shadow-sm"
+                >
+                  <X className="size-3.5 shrink-0" />
+                  <span>Reject</span>
+                </button>
+              </div>
+
+              {/* Offer Alternative Configuration Drawer */}
+              {showAltBox && (
+                <div className="rounded-lg border border-amber-500/30 bg-muted/50 p-3 space-y-2.5 animate-in fade-in duration-200">
+                  <p className="text-[11px] font-semibold text-foreground">Specify Alternative Slot / Venue</p>
+                  <div>
+                    <label className="block text-[10px] text-muted-foreground mb-1">Alternative Venue</label>
+                    <select
+                      value={altVenueInput || (availableRooms[0] || 'AUD')}
+                      onChange={e => setAltVenueInput(e.target.value)}
+                      className="w-full rounded-md border border-timetable-grid bg-card px-2.5 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      {availableRoomsList.map(r => (
+                        <option key={r.id} value={r.id}>
+                          {r.name || r.id} {r.capacity ? `(${r.capacity} seats)` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-muted-foreground mb-1">Reason / Notes for Requester</label>
+                    <input
+                      type="text"
+                      value={altReasonInput}
+                      onChange={e => setAltReasonInput(e.target.value)}
+                      placeholder="e.g. Primary venue busy; shifted to SH-1"
+                      className="w-full rounded-md border border-timetable-grid bg-card px-2.5 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const finalRoom = altVenueInput || (availableRooms[0] || 'AUD')
+                      const finalReason = altReasonInput.trim() || `Alternative venue ${finalRoom} offered by coordinator`
+                      handleBookingAction(selected.id ?? '', 'alternative', finalRoom, finalReason)
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 rounded-md bg-amber-600 py-1.5 text-xs font-medium text-white hover:bg-amber-700 transition"
+                  >
+                    <Clock3 className="size-3.5" />
+                    Confirm Alternative Offer
+                  </button>
+                </div>
+              )}
+            </div>
+          )
+        }
+
+        // Already Decided State
+        return (
+          <div className="mt-4 pt-4 border-t border-timetable-grid flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-foreground uppercase tracking-wide">Booking Status</p>
+              <button
+                type="button"
+                onClick={() => { setEditingDecision(true); setShowAltBox(false); }}
+                className="text-xs text-muted-foreground hover:text-foreground underline font-medium"
+              >
+                Change decision
+              </button>
+            </div>
+            <div className={`flex items-center gap-2.5 rounded-lg border p-3 ${
+              selected.status === 'Approved'
+                ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                : selected.status === 'Alternative Offered'
+                ? 'border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                : 'border-rose-500/20 bg-rose-500/10 text-rose-700 dark:text-rose-400'
+            }`}>
+              {selected.status === 'Approved' ? (
+                <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
+              ) : selected.status === 'Alternative Offered' ? (
+                <Clock3 className="size-4 shrink-0 text-amber-600" />
+              ) : (
+                <XCircle className="size-4 shrink-0 text-rose-600" />
+              )}
+              <div className="text-xs">
+                <span className="font-semibold">{selected.status}</span>
+                <span className="opacity-80"> · Decision is recorded in live database</span>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Ask AI Explanation: Strictly restricted to Master Timetable sessions */}
+      {activeTab === 0 && selected.type === 'session' && (
+        <button
+          onClick={handleAskAiExplain}
+          disabled={aiLoading}
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 text-sm font-medium text-ink-foreground hover:opacity-90 disabled:opacity-50"
+        >
+          {aiLoading ? <Loader2 className="size-4 animate-spin" /> : <Bot className="size-4" />}
+          Ask AI: Why is this placed here?
+        </button>
+      )}
     </aside>}
   </main>
 }

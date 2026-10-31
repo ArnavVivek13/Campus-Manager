@@ -306,7 +306,7 @@ def get_exams():
 def get_fest_bookings(db: Session = Depends(get_db)):
     """
     Returns Spectra week booking requests and decisions, merged with
-    custom bookings submitted via the AI Assistant / DB booking route.
+    custom bookings stored in the SQL database (live DBMS authoritative state).
     """
     sched = STATE.get("schedule")
     if not sched or not STATE.get("data"):
@@ -318,45 +318,64 @@ def get_fest_bookings(db: Session = Depends(get_db)):
     decisions = sched.get("fest_week", {}).get("bookings", [])
     dec_map = {d["request_id"]: d for d in decisions}
 
+    # Fetch live DBMS bookings so database changes are immediately reflected
+    db_bookings_map = {}
+    try:
+        all_db_bookings = db.query(BookingModel).all()
+        db_bookings_map = {b.id: b for b in all_db_bookings}
+    except Exception:
+        pass
+
     enriched = []
     for r in requests:
         rid = r["id"]
         d = dec_map.get(rid, {})
         is_cancelled = rid in cancellations
-        enriched.append({
-            "request": r,
-            "status": "cancelled" if is_cancelled else d.get("status", "pending"),
-            "day": d.get("day"),
-            "start_period": d.get("start_period"),
-            "end_period": d.get("end_period"),
-            "room_id": d.get("room_id"),
-            "reason": "Cancelled by requester" if is_cancelled else d.get("reason", "")
-        })
+
+        # If updated in SQL database, use live DB record as source of truth
+        if rid in db_bookings_map:
+            db_rec = db_bookings_map[rid]
+            st = "cancelled" if is_cancelled else (db_rec.status.lower() if db_rec.status else "pending")
+            enriched.append({
+                "request": r,
+                "status": st,
+                "day": db_rec.assigned_day or d.get("day"),
+                "start_period": db_rec.assigned_start_period or d.get("start_period"),
+                "end_period": db_rec.assigned_end_period or d.get("end_period"),
+                "room_id": db_rec.assigned_venue if db_rec.assigned_venue and db_rec.assigned_venue != "—" else d.get("room_id"),
+                "reason": db_rec.reason or ("Cancelled by requester" if is_cancelled else d.get("reason", ""))
+            })
+        else:
+            enriched.append({
+                "request": r,
+                "status": "cancelled" if is_cancelled else d.get("status", "pending"),
+                "day": d.get("day"),
+                "start_period": d.get("start_period"),
+                "end_period": d.get("end_period"),
+                "room_id": d.get("room_id"),
+                "reason": "Cancelled by requester" if is_cancelled else d.get("reason", "")
+            })
 
     # Include newly submitted database bookings from AI Assistant
-    try:
-        custom_db_bookings = db.query(BookingModel).all()
-        for cb in custom_db_bookings:
-            if cb.id not in req_map:
-                enriched.insert(0, {
-                    "request": {
-                        "id": cb.id,
-                        "title": cb.event_name,
-                        "requester": cb.requester or cb.club_name,
-                        "role": cb.role or "club",
-                        "attendance": cb.attendance,
-                        "duration_periods": cb.duration_periods or 1,
-                        "windows": [{"day": cb.assigned_day or "WED", "from_period": cb.assigned_start_period or 10, "to_period": cb.assigned_end_period or 11}],
-                    },
-                    "status": cb.status.lower() if cb.status else "pending",
-                    "day": cb.assigned_day or "WED",
-                    "start_period": cb.assigned_start_period or 10,
-                    "end_period": cb.assigned_end_period or 11,
-                    "room_id": cb.assigned_venue if cb.assigned_venue != "—" else None,
-                    "reason": cb.reason or "Submitted via AI Booking Assistant"
-                })
-    except Exception:
-        pass
+    for b_id, cb in db_bookings_map.items():
+        if b_id not in req_map:
+            enriched.insert(0, {
+                "request": {
+                    "id": cb.id,
+                    "title": cb.event_name,
+                    "requester": cb.requester or cb.club_name,
+                    "role": cb.role or "club",
+                    "attendance": cb.attendance,
+                    "duration_periods": cb.duration_periods or 1,
+                    "windows": [{"day": cb.assigned_day or "WED", "from_period": cb.assigned_start_period or 10, "to_period": cb.assigned_end_period or 11}],
+                },
+                "status": cb.status.lower() if cb.status else "pending",
+                "day": cb.assigned_day or "WED",
+                "start_period": cb.assigned_start_period or 10,
+                "end_period": cb.assigned_end_period or 11,
+                "room_id": cb.assigned_venue if cb.assigned_venue != "—" else None,
+                "reason": cb.reason or "Submitted via AI Booking Assistant"
+            })
 
     return {
         "bookings": enriched,
@@ -1124,14 +1143,16 @@ def create_db_booking(
 @app.post("/api/db/bookings/{booking_id}/action", tags=["Database Management"])
 def review_booking_action(
     booking_id: str,
-    action: str = Body(..., embed=True), # "approve" or "reject"
+    action: str = Body(..., embed=True), # "approve", "reject", "alternative"
     assigned_room: Optional[str] = Body(None, embed=True),
+    assigned_day: Optional[str] = Body(None, embed=True),
+    reason: Optional[str] = Body(None, embed=True),
     current_user: User = Depends(require_permission(PermissionEnum.BOOKING_APPROVE)),
     db: Session = Depends(get_db)
 ):
     """
     RBAC Protected (Admin or Coordinator):
-    Approves or rejects a pending venue booking request.
+    Approves, rejects, or offers an alternative for a venue booking request.
     Enforces 'no self-approval' rule: a user cannot approve their own booking request.
     """
     booking = db.query(BookingModel).filter(BookingModel.id == booking_id).first()
@@ -1141,17 +1162,44 @@ def review_booking_action(
     if booking.requested_by_id == current_user.id and current_user.role != RoleEnum.ADMIN:
         raise HTTPException(status_code=403, detail="Self-approval is forbidden: you cannot approve your own booking request.")
 
-    if action.lower() == "approve":
+    act = action.lower().strip()
+    if act == "approve":
         booking.status = "approved"
         if assigned_room:
             booking.assigned_venue = assigned_room
-        booking.reason = f"Approved by {current_user.full_name} ({current_user.role.value})"
-    else:
+        booking.reason = reason or f"Approved by {current_user.full_name} ({current_user.role.value})"
+    elif act in ["alternative", "alternative_offered"]:
+        booking.status = "alternative_offered"
+        if assigned_room:
+            booking.assigned_venue = assigned_room
+        if assigned_day:
+            booking.assigned_day = assigned_day
+        booking.reason = reason or f"Alternative venue/slot offered by {current_user.full_name} ({current_user.role.value})"
+    elif act == "reject":
         booking.status = "rejected"
-        booking.reason = f"Declined by {current_user.full_name} ({current_user.role.value})"
+        booking.reason = reason or f"Declined by {current_user.full_name} ({current_user.role.value})"
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid action '{action}'. Must be 'approve', 'reject', or 'alternative'.")
 
     db.commit()
     db.refresh(booking)
+
+    # Keep in-memory schedule fest_week in sync if present
+    try:
+        sched = STATE.get("schedule")
+        if sched and "fest_week" in sched and "bookings" in sched["fest_week"]:
+            for b in sched["fest_week"]["bookings"]:
+                if b.get("request_id") == booking_id:
+                    b["status"] = booking.status
+                    if booking.assigned_venue and booking.assigned_venue != "—":
+                        b["room_id"] = booking.assigned_venue
+                    if booking.assigned_day:
+                        b["day"] = booking.assigned_day
+                    b["reason"] = booking.reason
+                    break
+    except Exception:
+        pass
+
     return {"status": "success", "booking_id": booking.id, "current_status": booking.status, "reason": booking.reason}
 
 
