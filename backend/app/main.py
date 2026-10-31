@@ -303,6 +303,17 @@ def approve_disruption():
     }
 
 
+@app.post("/api/disruption/revert")
+def revert_disruption():
+    """Admin reverts active timetable back to clean baseline schedule."""
+    STATE["active_view"] = "baseline"
+    return {
+        "status": "reverted",
+        "active_view": STATE["active_view"],
+        "message": "Reverted back to baseline semester timetable."
+    }
+
+
 @app.post("/api/admin/reset")
 def reset_demo_data():
     """
