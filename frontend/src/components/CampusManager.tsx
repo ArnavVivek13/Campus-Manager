@@ -1,8 +1,17 @@
 import React from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Bot, CalendarDays, Check, ChevronRight, CircleCheck, Clock3, Command, DoorOpen, GitCompareArrows, GraduationCap, MessageSquareText, MoreHorizontal, PanelLeft, Pencil, RotateCcw, Send, SlidersHorizontal, Sparkles, Users, X, Menu, Moon, Sun, Loader2, History, CheckCircle2, XCircle, ArrowRight } from 'lucide-react'
+import { AlertTriangle, Bot, CalendarDays, Check, ChevronRight, CircleCheck, Clock3, Command, DoorOpen, GitCompareArrows, GraduationCap, MessageSquareText, MoreHorizontal, PanelLeft, Pencil, RotateCcw, Send, SlidersHorizontal, Sparkles, Users, X, Menu, Moon, Sun, Loader2, History, CheckCircle2, XCircle, ArrowRight, LogOut, Lock, Mail, Eye, EyeOff, ShieldCheck, UserPlus } from 'lucide-react'
 
 const API_BASE = 'http://127.0.0.1:8000'
+
+type AuthUser = {
+  id: number
+  email: string
+  full_name: string
+  role: string
+  department?: string
+  permissions?: string[]
+}
 
 type Hue = 'violet' | 'sky' | 'peach' | 'mint' | 'periwinkle' | 'rose'
 const hue: Record<Hue, string> = {
@@ -139,6 +148,16 @@ const examDetail = (e: string[]): Detail => ({
 })
 
 export default function CampusManager() {
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem('auth_user')
+      if (cached) {
+        try { return JSON.parse(cached) } catch {}
+      }
+    }
+    return null
+  })
+  const [authLoading, setAuthLoading] = useState(true)
   const [activeTab, setActiveTab] = useState(0)
   const [role, setRole] = useState('Admin')
   const [selected, setSelected] = useState<Detail | null>(null)
@@ -180,6 +199,41 @@ export default function CampusManager() {
 
   useEffect(() => { setDark(localStorage.getItem('theme') === 'dark') }, [])
   useEffect(() => { document.documentElement.classList.toggle('dark', dark); localStorage.setItem('theme', dark ? 'dark' : 'light') }, [dark])
+
+  // Verify stored JWT authentication on mount
+  useEffect(() => {
+    const token = localStorage.getItem('auth_token')
+    if (!token) {
+      setAuthLoading(false)
+      return
+    }
+    fetch(`${API_BASE}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(res => {
+        if (res.ok) return res.json()
+        throw new Error('Unauthorized')
+      })
+      .then(u => {
+        setCurrentUser(u)
+        localStorage.setItem('auth_user', JSON.stringify(u))
+        const roleLabelMap: Record<string, string> = {
+          'ADMIN': 'Admin',
+          'FACULTY': 'Faculty',
+          'CLUB_LEAD': 'Club Representative',
+          'STUDENT': 'Student'
+        }
+        setRole(roleLabelMap[u.role] || u.role)
+      })
+      .catch(() => {
+        localStorage.removeItem('auth_token')
+        localStorage.removeItem('auth_user')
+        setCurrentUser(null)
+      })
+      .finally(() => {
+        setAuthLoading(false)
+      })
+  }, [])
 
   // --- Dynamic API Fetchers ---
 
@@ -567,10 +621,55 @@ export default function CampusManager() {
         const data = await res.json()
         if (data.access_token) {
           localStorage.setItem('auth_token', data.access_token)
+          localStorage.setItem('auth_user', JSON.stringify(data.user))
+          setCurrentUser(data.user)
           setNotice(`Authenticated as ${data.user.full_name} (${data.user.role})`)
         }
       }
     } catch {}
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('auth_token')
+    localStorage.removeItem('auth_user')
+    setCurrentUser(null)
+    setNotice('Signed out successfully.')
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-canvas flex flex-col items-center justify-center p-4">
+        <div className="grid size-14 place-items-center rounded-2xl bg-ink text-ink-foreground shadow-xl animate-pulse mb-4">
+          <GraduationCap className="size-8" />
+        </div>
+        <p className="text-base font-semibold text-foreground">CIT Operations Portal</p>
+        <p className="text-xs text-muted-foreground mt-1 flex items-center gap-2">
+          <Loader2 className="size-3.5 animate-spin" /> Verifying security credentials...
+        </p>
+      </div>
+    )
+  }
+
+  if (!currentUser) {
+    return (
+      <AuthScreen
+        onLoginSuccess={(token, user) => {
+          localStorage.setItem('auth_token', token)
+          localStorage.setItem('auth_user', JSON.stringify(user))
+          setCurrentUser(user)
+          const roleLabelMap: Record<string, string> = {
+            'ADMIN': 'Admin',
+            'FACULTY': 'Faculty',
+            'CLUB_LEAD': 'Club Representative',
+            'STUDENT': 'Student'
+          }
+          setRole(roleLabelMap[user.role] || user.role)
+          setNotice(`Welcome, ${user.full_name}`)
+        }}
+        dark={dark}
+        setDark={setDark}
+      />
+    )
   }
 
   return <main className="min-h-screen bg-canvas p-3 text-foreground lg:p-6">
@@ -583,12 +682,30 @@ export default function CampusManager() {
         </div>
         <p className="mt-9 mb-3 text-sm text-muted-foreground">Main menu</p>
         <nav className="flex flex-col gap-1" role="tablist">{tabs.map((tab, i) => { const Icon = tabIcons[i] ?? CalendarDays; return <button key={tab} role="tab" aria-selected={activeTab === i} onClick={() => { setActiveTab(i); setMenuOpen(false) }} className={`flex items-center gap-3 rounded-full px-4 py-2.5 text-left text-sm transition ${activeTab === i ? 'bg-card/80 font-medium shadow-sm' : 'text-foreground/80 hover:bg-card/50'}`}><Icon className="size-4 shrink-0" />{tab}</button> })}</nav>
-        <p className="mt-8 mb-3 text-sm text-muted-foreground">Role</p>
+        <p className="mt-8 mb-3 text-sm text-muted-foreground">Switch Role</p>
         <div className="flex flex-col gap-1">{roles.map(r => <button key={r} onClick={() => handleRoleChange(r)} className={`flex items-center gap-3 rounded-full px-4 py-2 text-left text-[13px] transition ${role === r ? 'bg-card/80 font-medium' : 'text-foreground/70 hover:bg-card/50'}`}><Users className="size-3.5" />{r}</button>)}</div>
         <div className="mt-auto pt-6">
           <button onClick={resetDemo} className="flex w-full items-center gap-3 rounded-full px-4 py-2 text-[13px] text-destructive hover:bg-card/50"><RotateCcw className="size-3.5" />Reset Demo Data</button>
-          <p className="mt-5 mb-3 text-sm text-muted-foreground">Account</p>
-          <div className="flex items-center gap-3"><div className="grid size-11 place-items-center rounded-full bg-ink text-xs font-semibold text-ink-foreground">{role.slice(0, 2).toUpperCase()}</div><div><p className="text-sm font-semibold">CIT Operations</p><p className="text-xs text-muted-foreground">{role}</p></div></div>
+          
+          <div className="mt-5 flex items-center justify-between">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Account</p>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-destructive transition"
+              title="Sign Out"
+            >
+              <LogOut className="size-3" /> Sign Out
+            </button>
+          </div>
+          <div className="mt-2 flex items-center gap-3 rounded-xl border border-timetable-grid bg-card/60 p-2.5">
+            <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-ink text-xs font-semibold text-ink-foreground">
+              {currentUser.full_name?.slice(0, 2).toUpperCase() || role.slice(0, 2).toUpperCase()}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold truncate text-foreground">{currentUser.full_name || 'CIT Operations'}</p>
+              <p className="text-[11px] text-muted-foreground truncate">{currentUser.email || role}</p>
+            </div>
+          </div>
         </div>
       </aside>
 
@@ -1230,4 +1347,414 @@ function Assistant({
       </div>
     </div>
   </div>
+}
+
+function AuthScreen({
+  onLoginSuccess,
+  dark,
+  setDark,
+}: {
+  onLoginSuccess: (token: string, user: AuthUser) => void
+  dark: boolean
+  setDark: React.Dispatch<React.SetStateAction<boolean>>
+}) {
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [fullName, setFullName] = useState('')
+  const [selectedRole, setSelectedRole] = useState('STUDENT')
+  const [department, setDepartment] = useState('Computer Science')
+  const [showPassword, setShowPassword] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    if (!email.trim() || !password.trim()) {
+      setError('Please provide both email and password.')
+      return
+    }
+    setError('')
+    setLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password })
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.detail || 'Login failed. Please check your credentials.')
+      }
+      onLoginSuccess(data.access_token, data.user)
+    } catch (err: any) {
+      setError(err.message || 'Unable to connect to server.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!email.trim() || !password.trim() || !fullName.trim()) {
+      setError('Please fill in all required fields.')
+      return
+    }
+    setError('')
+    setLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+          full_name: fullName.trim(),
+          role: selectedRole,
+          department: department.trim()
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.detail || 'Registration failed.')
+      }
+      onLoginSuccess(data.access_token, data.user)
+    } catch (err: any) {
+      setError(err.message || 'Registration failed.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleQuickDemoLogin = async (roleEnum: string) => {
+    setError('')
+    setLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/oauth/demo-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: roleEnum })
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.detail || 'Demo login failed.')
+      }
+      onLoginSuccess(data.access_token, data.user)
+    } catch (err: any) {
+      setError(err.message || 'Demo login failed.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleGoogleSSO = async () => {
+    setError('')
+    setLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/oauth/google/url`)
+      if (res.ok) {
+        const data = await res.json()
+        if (data.url) {
+          window.location.href = data.url
+          return
+        }
+      }
+      // If Google OAuth credentials aren't configured in .env, fallback to standard demo login
+      await handleQuickDemoLogin('ADMIN')
+    } catch {
+      await handleQuickDemoLogin('ADMIN')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const demoPersonas = [
+    { title: 'Academic Dean', role: 'ADMIN', email: 'admin@cit.edu', icon: '👑', color: 'border-emerald-500/30 hover:border-emerald-500' },
+    { title: 'Dr. Arvind Rao (Faculty)', role: 'FACULTY', email: 'faculty@cit.edu', icon: '👨‍🏫', color: 'border-blue-500/30 hover:border-blue-500' },
+    { title: 'Aarav Mehta (Club Lead)', role: 'CLUB_LEAD', email: 'club@cit.edu', icon: '🎪', color: 'border-purple-500/30 hover:border-purple-500' },
+    { title: 'Rohan Sharma (Student)', role: 'STUDENT', email: 'student@cit.edu', icon: '🎓', color: 'border-amber-500/30 hover:border-amber-500' },
+  ]
+
+  return (
+    <div className="min-h-screen bg-canvas p-4 flex flex-col justify-center items-center relative overflow-hidden">
+      {/* Dark mode toggle */}
+      <div className="absolute top-4 right-4 flex items-center gap-2">
+        <button
+          role="switch"
+          aria-checked={dark}
+          aria-label="Toggle dark mode"
+          onClick={() => setDark(d => !d)}
+          className="relative flex h-8 w-16 items-center justify-between rounded-full bg-secondary px-2 text-muted-foreground"
+        >
+          <Sun className="size-3.5" />
+          <Moon className="size-3.5" />
+          <span className={`absolute top-1 size-6 rounded-full bg-ev-mint shadow-sm transition-all ${dark ? 'left-9' : 'left-1'}`} />
+        </button>
+      </div>
+
+      <div className="w-full max-w-md my-8">
+        {/* Header */}
+        <div className="text-center mb-6">
+          <div className="inline-flex size-14 items-center justify-center rounded-2xl bg-ink text-ink-foreground shadow-lg mb-3">
+            <GraduationCap className="size-7" />
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">CIT Operations Portal</h1>
+          <p className="text-xs text-muted-foreground mt-1">
+            Chilika Institute of Technology · Campus Management & Scheduling
+          </p>
+        </div>
+
+        {/* Card */}
+        <div className="rounded-2xl border border-timetable-grid bg-card p-6 shadow-xl backdrop-blur-sm">
+          {/* Mode Switcher */}
+          <div className="grid grid-cols-2 gap-1 rounded-xl bg-muted p-1 mb-5">
+            <button
+              type="button"
+              onClick={() => { setMode('login'); setError('') }}
+              className={`rounded-lg py-2 text-xs font-semibold transition ${
+                mode === 'login'
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode('register'); setError('') }}
+              className={`rounded-lg py-2 text-xs font-semibold transition ${
+                mode === 'register'
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Create Account
+            </button>
+          </div>
+
+          {/* Error Banner */}
+          {error && (
+            <div className="mb-4 flex items-center gap-2 rounded-lg bg-rose-500/10 border border-rose-500/20 p-3 text-xs text-rose-600">
+              <AlertTriangle className="size-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {mode === 'login' ? (
+            <div>
+              {/* Demo One-Click Personas */}
+              <div className="mb-5">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    ⚡ Quick Demo Login
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">1-Click Access</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {demoPersonas.map(p => (
+                    <button
+                      key={p.role}
+                      type="button"
+                      disabled={loading}
+                      onClick={() => handleQuickDemoLogin(p.role)}
+                      className={`flex flex-col items-start p-2.5 rounded-xl border bg-background/50 hover:bg-secondary/60 transition text-left ${p.color} disabled:opacity-50`}
+                    >
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                        <span>{p.icon}</span>
+                        <span className="truncate">{p.title}</span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground mt-0.5 truncate">{p.email}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="relative my-4 flex items-center justify-center">
+                <div className="border-t border-timetable-grid w-full" />
+                <span className="bg-card px-3 text-[11px] font-medium text-muted-foreground uppercase">
+                  or email login
+                </span>
+              </div>
+
+              {/* Login Form */}
+              <form onSubmit={handleLogin} className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">
+                    Campus Email
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      placeholder="e.g. admin@cit.edu"
+                      className="w-full rounded-xl border border-timetable-grid bg-background pl-9 pr-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ink"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-medium text-foreground">
+                      Password
+                    </label>
+                    <span className="text-[10px] text-muted-foreground">Demo: Admin@123</span>
+                  </div>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      placeholder="Enter password"
+                      className="w-full rounded-xl border border-timetable-grid bg-background pl-9 pr-9 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ink"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(v => !v)}
+                      className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground"
+                    >
+                      {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-ink py-2.5 text-xs font-semibold text-ink-foreground hover:opacity-90 transition disabled:opacity-50 mt-4 shadow-sm"
+                >
+                  {loading ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+                  Sign In to Campus Portal
+                </button>
+
+                {/* Google SSO */}
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={handleGoogleSSO}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl border border-timetable-grid bg-card py-2 text-xs font-medium text-foreground hover:bg-secondary transition disabled:opacity-50"
+                >
+                  <svg className="size-4" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                  </svg>
+                  Continue with Google
+                </button>
+              </form>
+            </div>
+          ) : (
+            /* Registration Form */
+            <form onSubmit={handleRegister} className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={fullName}
+                  onChange={e => setFullName(e.target.value)}
+                  placeholder="e.g. Dr. Priyadarshi Dash"
+                  className="w-full rounded-xl border border-timetable-grid bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ink"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">
+                  Institutional Email
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="name@cit.edu"
+                    className="w-full rounded-xl border border-timetable-grid bg-background pl-9 pr-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ink"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">
+                  Create Password
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="At least 6 characters"
+                    className="w-full rounded-xl border border-timetable-grid bg-background pl-9 pr-9 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ink"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(v => !v)}
+                    className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground"
+                  >
+                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">
+                    Role
+                  </label>
+                  <select
+                    value={selectedRole}
+                    onChange={e => setSelectedRole(e.target.value)}
+                    className="w-full rounded-xl border border-timetable-grid bg-background px-2.5 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ink"
+                  >
+                    <option value="STUDENT">Student</option>
+                    <option value="FACULTY">Faculty</option>
+                    <option value="CLUB_LEAD">Club Representative</option>
+                    <option value="ADMIN">Dean / Admin</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">
+                    Department
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={department}
+                    onChange={e => setDepartment(e.target.value)}
+                    placeholder="e.g. CSE / ECE"
+                    className="w-full rounded-xl border border-timetable-grid bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ink"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-ink py-2.5 text-xs font-semibold text-ink-foreground hover:opacity-90 transition disabled:opacity-50 mt-4 shadow-sm"
+              >
+                {loading ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" />}
+                Create Account & Access Portal
+              </button>
+            </form>
+          )}
+        </div>
+
+        {/* Footer info */}
+        <p className="mt-4 text-center text-[11px] text-muted-foreground">
+          Protected by Campus RBAC & JWT Security · Multi-Tenant DBMS Integration
+        </p>
+      </div>
+    </div>
+  )
 }
