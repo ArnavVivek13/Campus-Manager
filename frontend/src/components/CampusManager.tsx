@@ -1,6 +1,8 @@
 import React from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Bot, CalendarDays, Check, ChevronRight, CircleCheck, Clock3, Command, DoorOpen, GitCompareArrows, GraduationCap, MessageSquareText, MoreHorizontal, PanelLeft, Pencil, RotateCcw, Send, SlidersHorizontal, Sparkles, Users, X, Menu, Moon, Sun } from 'lucide-react'
+import { AlertTriangle, Bot, CalendarDays, Check, ChevronRight, CircleCheck, Clock3, Command, DoorOpen, GitCompareArrows, GraduationCap, MessageSquareText, MoreHorizontal, PanelLeft, Pencil, RotateCcw, Send, SlidersHorizontal, Sparkles, Users, X, Menu, Moon, Sun, Loader2 } from 'lucide-react'
+
+const API_BASE = 'http://127.0.0.1:8000'
 
 type Hue = 'violet' | 'sky' | 'peach' | 'mint' | 'periwinkle' | 'rose'
 const hue: Record<Hue, string> = {
@@ -22,8 +24,36 @@ const HOUR_PX = 80
 const categories = ['All', 'Computing', 'Math', 'Electronics', 'Humanities', 'Lab']
 const catHue: Record<string, Hue> = { Computing: 'violet', Math: 'periwinkle', Electronics: 'sky', Humanities: 'peach', Lab: 'mint' }
 
-type Session = { day: number; start: number; end: number; id: string; name: string; room: string; faculty: string; cat: string; confirmed?: boolean }
-const sessions: Session[] = [
+const dayMap: Record<string, number> = { MON: 0, TUE: 1, WED: 2, THU: 3, FRI: 4, Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4 }
+function periodToHour(period: number): number {
+  if (period <= 5) return 7 + period // 1->8, 2->9, 3->10, 4->11, 5->12
+  return 8 + period // 6->14, 7->15, 8->16, 9->17
+}
+
+const deptCategory = (dept: string = ''): string => {
+  const d = dept.toUpperCase()
+  if (d.includes('CS') || d.includes('COMP')) return 'Computing'
+  if (d.includes('MA') || d.includes('MATH')) return 'Math'
+  if (d.includes('EC') || d.includes('ELEC')) return 'Electronics'
+  if (d.includes('HS') || d.includes('HUM')) return 'Humanities'
+  if (d.includes('LAB')) return 'Lab'
+  return 'Computing'
+}
+
+type Session = {
+  day: number
+  start: number
+  end: number
+  id: string
+  name: string
+  room: string
+  faculty: string
+  cat: string
+  confirmed?: boolean
+  group?: string
+}
+
+const defaultSessions: Session[] = [
   { day: 0, start: 8, end: 9, id: 'CS201', name: 'Data Structures', room: 'LH-1', faculty: 'F01', cat: 'Computing', confirmed: true },
   { day: 1, start: 9, end: 10, id: 'MA202', name: 'Discrete Mathematics', room: 'LH-2', faculty: 'F07', cat: 'Math' },
   { day: 2, start: 8, end: 9, id: 'CS203', name: 'Computer Networks', room: 'LH-1', faculty: 'F03', cat: 'Computing' },
@@ -35,35 +65,75 @@ const sessions: Session[] = [
   { day: 4, start: 16, end: 17, id: 'PE101', name: 'Professional Ethics', room: 'LH-2', faculty: 'F08', cat: 'Humanities', confirmed: true },
   { day: 1, start: 10.5, end: 12, id: 'MA204', name: 'Linear Algebra', room: 'LH-2', faculty: 'F07', cat: 'Math', confirmed: true },
 ]
-const bookings = [
+
+const defaultBookings = [
   ['SP-027', 'Design Conclave', 'Aarav Mehta · Club Rep.', 'Wed, 16:00–20:00', 'AUD · Wed, 16:00–20:00', 'Approved'],
   ['SP-031', 'Battle of Bands', 'CIT Music Society · Club Rep.', 'Fri, 17:00–21:00', 'AMPH · Fri, 18:00–22:00', 'Alternative Offered'],
   ['SP-034', 'Founder Fireside', 'E-Cell · Club Rep.', 'Thu, 15:00–17:00', 'LH-1 · Thu, 15:00–17:00', 'Approved'],
   ['SP-041', 'Robotics Showcase', 'Mech Club · Club Rep.', 'Sat, 09:00–14:00', '—', 'Rejected'],
 ]
-const exams = [
-  ['MON', 'AM', 'CS201', 'Data Structures', 'CSE-2, CSE-3', 'LH-1 · LH-2'], ['MON', 'PM', 'MA202', 'Discrete Mathematics', 'CSE-2, ECE-2', 'LH-1 · LH-2'],
-  ['TUE', 'AM', 'CS203', 'Computer Networks', 'CSE-2', 'LH-1'], ['WED', 'PM', 'CS205', 'Operating Systems', 'CSE-2, CSE-3', 'LH-1 · LH-2'],
-  ['THU', 'AM', 'HS201', 'Technical Writing', 'All Year 2', 'LH-1 · LH-2 · LH-3'], ['SAT', 'PM', 'CS204', 'Data Structures Lab', 'CSE-2', 'LAB-1 · LAB-2'],
+
+const defaultExams = [
+  ['MON', 'AM', 'CS201', 'Data Structures', 'CSE-2, CSE-3', 'LH-1 · LH-2'],
+  ['MON', 'PM', 'MA202', 'Discrete Mathematics', 'CSE-2, ECE-2', 'LH-1 · LH-2'],
+  ['TUE', 'AM', 'CS203', 'Computer Networks', 'CSE-2', 'LH-1'],
+  ['WED', 'PM', 'CS205', 'Operating Systems', 'CSE-2, CSE-3', 'LH-1 · LH-2'],
+  ['THU', 'AM', 'HS201', 'Technical Writing', 'All Year 2', 'LH-1 · LH-2 · LH-3'],
+  ['SAT', 'PM', 'CS204', 'Data Structures Lab', 'CSE-2', 'LAB-1 · LAB-2'],
 ]
+
+const defaultMoves = [
+  ['SES-04', 'CS204 · Data Structures Lab', 'Mon 12:00–15:00 · LAB-1', 'Mon 12:00–15:00 · LAB-2'],
+  ['SES-05', 'CS207 · AI Fundamentals', 'Tue 09:00 · LAB-1', 'Tue 09:00 · LAB-2'],
+  ['SES-06', 'ME201 · Manufacturing Lab', 'Tue 09:00 · LAB-1', 'Tue 09:00 · LAB-3']
+]
+
 const fmt = (h: number) => `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`
 
-type Detail = { kicker: string; title: string; hueCls: string; line1: string; line2: string; fields: [string, string][]; note: string }
+type Detail = {
+  id?: string
+  type?: 'session' | 'booking' | 'exam'
+  kicker: string
+  title: string
+  hueCls: string
+  line1: string
+  line2: string
+  fields: [string, string][]
+  note: string
+}
+
 const sessionDetail = (s: Session): Detail => ({
-  kicker: 'Session detail', title: s.name, hueCls: hue[catHue[s.cat] ?? 'violet'],
-  line1: `${s.id} · ${s.cat}`, line2: `${days[s.day]} · ${fmt(s.start)} – ${fmt(s.end)}`,
-  fields: [['Room', s.room], ['Faculty', s.faculty], ['Group', 'CSE-2'], ['Status', s.confirmed ? 'Confirmed' : 'Scheduled']],
-  note: 'Placed here to preserve faculty availability, room capacity, and the CSE-2 prerequisite chain. No hard constraints are violated.',
+  id: s.id,
+  type: 'session',
+  kicker: 'Session detail',
+  title: s.name,
+  hueCls: hue[catHue[s.cat] ?? 'violet'],
+  line1: `${s.id} · ${s.cat}`,
+  line2: `${days[s.day]} · ${fmt(s.start)} – ${fmt(s.end)}`,
+  fields: [['Room', s.room], ['Faculty', s.faculty], ['Group', s.group || 'CSE-2'], ['Status', s.confirmed ? 'Confirmed' : 'Scheduled']],
+  note: 'Placed here to preserve faculty availability, room capacity, and prerequisite requirements. Click "Ask AI" below to fetch real-time solver diagnosis.',
 })
+
 const bookingDetail = (r: string[]): Detail => ({
-  kicker: 'Booking detail', title: r[1] ?? '', hueCls: hue[r[5] === 'Approved' ? 'mint' : r[5] === 'Rejected' ? 'rose' : 'peach'],
-  line1: `${r[0]} · ${r[5]}`, line2: r[3] ?? '',
+  id: r[0],
+  type: 'booking',
+  kicker: 'Booking detail',
+  title: r[1] ?? '',
+  hueCls: hue[r[5] === 'Approved' ? 'mint' : r[5] === 'Rejected' ? 'rose' : 'peach'],
+  line1: `${r[0]} · ${r[5]}`,
+  line2: r[3] ?? '',
   fields: [['Requested by', r[2] ?? ''], ['Requested slot', r[3] ?? ''], ['Assigned venue', r[4] ?? ''], ['Status', r[5] ?? '']],
   note: r[5] === 'Approved' ? 'Approved after scoring against venue capacity, equipment needs, and clash checks.' : r[5] === 'Rejected' ? 'Rejected: no venue satisfies the capacity and equipment requirements for the requested slot.' : 'The requested slot clashes with an existing booking, so the closest available alternative was offered.',
 })
+
 const examDetail = (e: string[]): Detail => ({
-  kicker: 'Exam detail', title: e[3] ?? '', hueCls: hue[e[1] === 'AM' ? 'sky' : 'violet'],
-  line1: `${e[2]} · ${e[1] === 'AM' ? 'Morning' : 'Afternoon'} session`, line2: `${e[0]} · ${e[1] === 'AM' ? '09:30 – 11:30' : '14:00 – 16:00'}`,
+  id: e[2],
+  type: 'exam',
+  kicker: 'Exam detail',
+  title: e[3] ?? '',
+  hueCls: hue[e[1] === 'AM' ? 'sky' : 'violet'],
+  line1: `${e[2]} · ${e[1] === 'AM' ? 'Morning' : 'Afternoon'} session`,
+  line2: `${e[0]} · ${e[1] === 'AM' ? '09:30 – 11:30' : '14:00 – 16:00'}`,
   fields: [['Code', e[2] ?? ''], ['Groups', e[4] ?? ''], ['Rooms', e[5] ?? ''], ['Session', e[1] === 'AM' ? 'Morning' : 'Afternoon']],
   note: 'Seating and invigilation are arranged so no student has two papers in the same slot, and room capacity covers all listed groups.',
 })
@@ -74,21 +144,298 @@ export default function CampusManager() {
   const [selected, setSelected] = useState<Detail | null>(null)
   const [bookingText, setBookingText] = useState('')
   const [parsed, setParsed] = useState(false)
+  const [parsedData, setParsedData] = useState<any>(null)
   const [statusFilter, setStatusFilter] = useState('All')
   const [disruptionPreview, setDisruptionPreview] = useState(false)
   const [notice, setNotice] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const [dark, setDark] = useState(false)
+  const [aiLoading, setAiLoading] = useState(false)
+
+  // Live Backend State
+  const [sessionsList, setSessionsList] = useState<Session[]>(defaultSessions)
+  const [examsList, setExamsList] = useState<string[][]>(defaultExams)
+  const [bookingsList, setBookingsList] = useState<string[][]>(defaultBookings)
+  const [festStats, setFestStats] = useState<[string, string, Hue][]>([
+    ['64.5/70', 'Booking score', 'violet'],
+    ['21', 'Approved', 'mint'],
+    ['2', 'Alternatives offered', 'peach'],
+    ['2', 'Rejected', 'rose'],
+    ['0', 'Inversions', 'sky'],
+  ])
+  const [disruptionMoves, setDisruptionMoves] = useState<string[][]>(defaultMoves)
+  const [availableGroups, setAvailableGroups] = useState<string[]>(['CSE-2', 'All', 'Y1-A', 'Y1-B', 'Y1-C', 'Y1-D', 'CSE-3', 'ECE-2'])
+  const [selectedGroup, setSelectedGroup] = useState<string>('CSE-2')
+  const [venuesList, setVenuesList] = useState<[string, string, string][]>([
+    ['AUD', '420 seats', 'Available'],
+    ['SEM-HALL', '120 seats', 'Available'],
+    ['LH-1', '90 seats', 'Booked 18:00'],
+  ])
+  const [activeView, setActiveView] = useState<'baseline' | 'after_disruption'>('baseline')
+
   useEffect(() => { setDark(localStorage.getItem('theme') === 'dark') }, [])
   useEffect(() => { document.documentElement.classList.toggle('dark', dark); localStorage.setItem('theme', dark ? 'dark' : 'light') }, [dark])
 
-  const visibleBookings = useMemo(() => statusFilter === 'All' ? bookings : bookings.filter(b => b[5] === statusFilter), [statusFilter])
+  // --- Dynamic API Fetchers ---
+
+  const fetchSchedule = async (grp: string = selectedGroup, view: string = activeView) => {
+    try {
+      const q = grp === 'All' ? '' : `?group_id=${encodeURIComponent(grp)}`
+      const res = await fetch(`${API_BASE}/api/schedule${q}`)
+      if (!res.ok) return
+      const data = await res.json()
+      if (Array.isArray(data.sessions) && data.sessions.length > 0) {
+        const mapped: Session[] = data.sessions.map((s: any) => {
+          const d = dayMap[s.day] ?? 0
+          const start = periodToHour(s.start_period)
+          const end = start + (s.duration || 1)
+          const cat = s.kind === 'lab' ? 'Lab' : deptCategory(s.department || s.course_id)
+          return {
+            id: s.session_id,
+            name: s.course_title || s.course_id,
+            day: d,
+            start,
+            end,
+            room: s.room_id,
+            faculty: s.faculty_id,
+            cat,
+            confirmed: true,
+            group: (s.groups || []).join(', ')
+          }
+        })
+        setSessionsList(mapped)
+      }
+    } catch {
+      // offline fallback
+    }
+  }
+
+  const fetchMetadata = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/meta`)
+      if (!res.ok) return
+      const data = await res.json()
+      if (data.groups) {
+        const grpIds = ['CSE-2', 'All', ...data.groups.map((g: any) => g.id).filter((id: string) => id !== 'CSE-2')]
+        setAvailableGroups(grpIds)
+      }
+      if (data.rooms) {
+        const venues: [string, string, string][] = data.rooms.slice(0, 5).map((r: any) => [
+          r.id,
+          `${r.capacity} seats`,
+          r.id === 'LH-1' ? 'Booked 18:00' : 'Available'
+        ])
+        setVenuesList(venues)
+      }
+    } catch {}
+  }
+
+  const fetchExams = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/exams`)
+      if (!res.ok) return
+      const data = await res.json()
+      if (Array.isArray(data.exams) && data.exams.length > 0) {
+        const mapped = data.exams.map((e: any) => [
+          e.day,
+          e.session,
+          (e.course_ids || []).join(', ') || e.exam_id,
+          e.exam_id.replace('EX-', ''),
+          (e.groups || []).join(', '),
+          (e.rooms || []).join(' · ')
+        ])
+        setExamsList(mapped)
+      }
+    } catch {}
+  }
+
+  const fetchBookings = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/fest/bookings`)
+      if (!res.ok) return
+      const data = await res.json()
+      if (Array.isArray(data.bookings) && data.bookings.length > 0) {
+        const mapped = data.bookings.map((b: any) => {
+          const req = b.request || {}
+          const statusLabel = b.status === 'approved' ? 'Approved' : b.status === 'alternative_offered' ? 'Alternative Offered' : 'Rejected'
+          const slot = b.day ? `${b.day}, Period ${b.start_period || 4}–${b.end_period || 5}` : req.windows?.[0] ? `${req.windows[0].day}, P${req.windows[0].from_period}` : 'Fest Week'
+          const venue = b.room_id ? `${b.room_id} · ${b.day || ''}` : '—'
+          return [
+            req.id || 'BR',
+            req.title || 'Event',
+            `${req.requester || 'Club'} · ${req.role || 'Rep'}`,
+            slot,
+            venue,
+            statusLabel
+          ]
+        })
+        setBookingsList(mapped)
+
+        const approved = data.bookings.filter((b: any) => b.status === 'approved').length
+        const alts = data.bookings.filter((b: any) => b.status === 'alternative_offered').length
+        const rejs = data.bookings.filter((b: any) => b.status === 'rejected' || b.status === 'cancelled').length
+        setFestStats([
+          ['64.5/70', 'Booking score', 'violet'],
+          [String(approved), 'Approved', 'mint'],
+          [String(alts), 'Alternatives offered', 'peach'],
+          [String(rejs), 'Rejected', 'rose'],
+          ['0', 'Inversions', 'sky']
+        ])
+      }
+    } catch {}
+  }
+
+  // Initial load
+  useEffect(() => {
+    fetchMetadata()
+    fetchSchedule(selectedGroup)
+    fetchExams()
+    fetchBookings()
+  }, [])
+
+  // Refetch when group filter or disruption view toggles
+  useEffect(() => {
+    fetchSchedule(selectedGroup, activeView)
+  }, [selectedGroup, activeView])
+
+  const visibleBookings = useMemo(() => statusFilter === 'All' ? bookingsList : bookingsList.filter(b => b[5] === statusFilter), [statusFilter, bookingsList])
+
+  // --- Actions ---
+
   const submitBooking = async () => {
     if (!bookingText.trim()) return
-    try { await fetch('http://127.0.0.1:8000/api/ai/parse-booking', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: bookingText }) }) } catch { /* offline preview fallback */ }
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/parse-booking`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: bookingText })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setParsedData(data)
+      }
+    } catch {
+      /* offline preview fallback */
+    }
     setParsed(true)
   }
-  const resetDemo = async () => { try { await fetch('http://localhost:8000/api/admin/reset', { method: 'POST' }) } catch { /* offline preview fallback */ } setNotice('Demo data reset to the Semester 2027 baseline.') }
+
+  const confirmBookingDb = async () => {
+    try {
+      const token = localStorage.getItem('auth_token')
+      const payload = {
+        requester: 'Campus User',
+        title: parsedData?.title || bookingText || 'Seminar Booking',
+        attendance: parsedData?.attendance || 100,
+        windows: [{ day: parsedData?.windows?.[0]?.day || 'Wed', start_time: '18:00' }],
+        requested_room: parsedData?.requested_room || 'SEM-HALL'
+      }
+      await fetch(`${API_BASE}/api/db/bookings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(payload)
+      })
+      setNotice('Booking proposal successfully saved into live SQL database.')
+      fetchBookings()
+    } catch {
+      setNotice('Booking submitted in local offline mode.')
+    }
+  }
+
+  const resetDemo = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/reset`, { method: 'POST' })
+      if (res.ok) {
+        setActiveView('baseline')
+        setDisruptionPreview(false)
+        setNotice('Demo data reset to the Semester 2027 baseline.')
+        fetchSchedule(selectedGroup, 'baseline')
+      }
+    } catch {
+      setNotice('Demo data reset to the Semester 2027 baseline.')
+    }
+  }
+
+  const handlePreviewDisruption = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/disruption/preview`, { method: 'POST' })
+      if (res.ok) {
+        const data = await res.json()
+        if (Array.isArray(data.changes) && data.changes.length > 0) {
+          const mapped = data.changes.map((c: any) => [
+            c.session_id,
+            c.session_id,
+            `Original: Room ${c.from?.room_id || 'LAB-1'}`,
+            `Reassigned: Room ${c.to?.room_id || 'LAB-2'}`
+          ])
+          setDisruptionMoves(mapped)
+        }
+      }
+      setDisruptionPreview(true)
+    } catch {
+      setDisruptionPreview(true)
+    }
+  }
+
+  const handleApproveDisruption = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/disruption/approve`, { method: 'POST' })
+      if (res.ok) {
+        setActiveView('after_disruption')
+        setNotice('Schedule changes approved and committed to live semester timetable.')
+        fetchSchedule(selectedGroup, 'after_disruption')
+      }
+    } catch {
+      setNotice('Schedule changes approved and committed.')
+    }
+  }
+
+  const handleAskAiExplain = async () => {
+    if (!selected) return
+    setAiLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/explain`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query_type: selected.type || 'session', item_id: selected.id || 'CS201' })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.explanation) {
+          setSelected(prev => prev ? { ...prev, note: data.explanation } : null)
+        }
+      }
+    } catch {}
+    setAiLoading(false)
+  }
+
+  const handleRoleChange = async (newRole: string) => {
+    setRole(newRole)
+    const roleEnumMap: Record<string, string> = {
+      'Admin': 'ADMIN',
+      'Department Coordinator': 'ADMIN',
+      'Faculty': 'FACULTY',
+      'Club Representative': 'CLUB_LEAD'
+    }
+    const targetRole = roleEnumMap[newRole] || 'STUDENT'
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/oauth/demo-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: targetRole })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.access_token) {
+          localStorage.setItem('auth_token', data.access_token)
+          setNotice(`Authenticated as ${data.user.full_name} (${data.user.role})`)
+        }
+      }
+    } catch {}
+  }
 
   return <main className="min-h-screen bg-canvas p-3 text-foreground lg:p-6">
     <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-[1600px] gap-3 rounded-md grad-shell p-3">
@@ -101,7 +448,7 @@ export default function CampusManager() {
         <p className="mt-9 mb-3 text-sm text-muted-foreground">Main menu</p>
         <nav className="flex flex-col gap-1" role="tablist">{tabs.map((tab, i) => { const Icon = tabIcons[i] ?? CalendarDays; return <button key={tab} role="tab" aria-selected={activeTab === i} onClick={() => { setActiveTab(i); setMenuOpen(false) }} className={`flex items-center gap-3 rounded-full px-4 py-2.5 text-left text-sm transition ${activeTab === i ? 'bg-card/80 font-medium shadow-sm' : 'text-foreground/80 hover:bg-card/50'}`}><Icon className="size-4 shrink-0" />{tab}</button> })}</nav>
         <p className="mt-8 mb-3 text-sm text-muted-foreground">Role</p>
-        <div className="flex flex-col gap-1">{roles.map(r => <button key={r} onClick={() => setRole(r)} className={`flex items-center gap-3 rounded-full px-4 py-2 text-left text-[13px] transition ${role === r ? 'bg-card/80 font-medium' : 'text-foreground/70 hover:bg-card/50'}`}><Users className="size-3.5" />{r}</button>)}</div>
+        <div className="flex flex-col gap-1">{roles.map(r => <button key={r} onClick={() => handleRoleChange(r)} className={`flex items-center gap-3 rounded-full px-4 py-2 text-left text-[13px] transition ${role === r ? 'bg-card/80 font-medium' : 'text-foreground/70 hover:bg-card/50'}`}><Users className="size-3.5" />{r}</button>)}</div>
         <div className="mt-auto pt-6">
           <button onClick={resetDemo} className="flex w-full items-center gap-3 rounded-full px-4 py-2 text-[13px] text-destructive hover:bg-card/50"><RotateCcw className="size-3.5" />Reset Demo Data</button>
           <p className="mt-5 mb-3 text-sm text-muted-foreground">Account</p>
@@ -112,15 +459,15 @@ export default function CampusManager() {
       <div className="min-w-0 flex-1 rounded-lg bg-card p-3 lg:p-4">
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-timetable-grid px-5 py-4 text-sm">
           <div className="flex items-center gap-2"><button onClick={() => setMenuOpen(true)} aria-label="Open menu" className="-ml-1 rounded-full p-1.5 hover:bg-accent lg:hidden"><Menu className="size-5" /></button><span className="text-muted-foreground">CIT Campus</span><ChevronRight className="size-3.5 text-muted-foreground" /><Clock3 className="size-4" /><span className="font-medium">{tabs[activeTab]}</span></div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground"><span className="size-1.5 rounded-full bg-success" />Clash-free · 0 hard violations<button role="switch" aria-checked={dark} aria-label="Toggle dark mode" onClick={() => setDark(d => !d)} className="relative ml-3 flex h-8 w-16 items-center justify-between rounded-full bg-secondary px-2 text-muted-foreground"><Sun className="size-3.5" /><Moon className="size-3.5" /><span className={`absolute top-1 size-6 rounded-full bg-ev-mint shadow-sm transition-all ${dark ? 'left-9' : 'left-1'}`} /></button></div>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground"><span className="size-1.5 rounded-full bg-success" />Clash-free · 0 hard violations {activeView === 'after_disruption' && <span className="ml-2 rounded-full bg-warning-soft px-2 py-0.5 text-warning font-medium">Repaired View</span>}<button role="switch" aria-checked={dark} aria-label="Toggle dark mode" onClick={() => setDark(d => !d)} className="relative ml-3 flex h-8 w-16 items-center justify-between rounded-full bg-secondary px-2 text-muted-foreground"><Sun className="size-3.5" /><Moon className="size-3.5" /><span className={`absolute top-1 size-6 rounded-full bg-ev-mint shadow-sm transition-all ${dark ? 'left-9' : 'left-1'}`} /></button></div>
         </div>
         <div className="px-2 pt-6 pb-2 lg:px-4">
           {notice && <div className="mb-5 flex items-center justify-between rounded-lg bg-success-soft px-4 py-3 text-xs text-success"><span><Check className="mr-2 inline size-3.5" />{notice}</span><button onClick={() => setNotice('')} aria-label="Dismiss"><X className="size-4" /></button></div>}
-          {activeTab === 0 && <Timetable onSelect={s => setSelected(sessionDetail(s))} />}
-          {activeTab === 1 && <Fest rows={visibleBookings} filter={statusFilter} setFilter={setStatusFilter} onSelect={r => setSelected(bookingDetail(r))} />}
-          {activeTab === 2 && <ExamGrid onSelect={e => setSelected(examDetail(e))} />}
-          {activeTab === 3 && <Disruption preview={disruptionPreview} setPreview={setDisruptionPreview} setNotice={setNotice} />}
-          {activeTab === 4 && <Assistant bookingText={bookingText} setBookingText={setBookingText} parsed={parsed} submitBooking={submitBooking} />}
+          {activeTab === 0 && <Timetable sessionsList={sessionsList} availableGroups={availableGroups} selectedGroup={selectedGroup} onSelectGroup={setSelectedGroup} onSelect={s => setSelected(sessionDetail(s))} />}
+          {activeTab === 1 && <Fest rows={visibleBookings} stats={festStats} filter={statusFilter} setFilter={setStatusFilter} onSelect={r => setSelected(bookingDetail(r))} />}
+          {activeTab === 2 && <ExamGrid list={examsList} onSelect={e => setSelected(examDetail(e))} />}
+          {activeTab === 3 && <Disruption preview={disruptionPreview} moves={disruptionMoves} onPreview={handlePreviewDisruption} onApprove={handleApproveDisruption} />}
+          {activeTab === 4 && <Assistant bookingText={bookingText} setBookingText={setBookingText} parsed={parsed} parsedData={parsedData} submitBooking={submitBooking} confirmBooking={confirmBookingDb} venuesList={venuesList} />}
         </div>
       </div>
     </div>
@@ -130,7 +477,10 @@ export default function CampusManager() {
       <div className={`mt-5 rounded-none border border-timetable-grid p-4 ${selected.hueCls}`}><p className="text-sm font-medium">{selected.line1}</p><p className="mt-1 text-sm opacity-80">{selected.line2}</p></div>
       <div className="mt-4 grid grid-cols-2 gap-3">{selected.fields.map(([l, v]) => <div key={l} className="rounded-none border border-timetable-grid bg-muted p-3"><p className="text-[11px] text-muted-foreground">{l}</p><p className="mt-1 text-sm font-medium">{v}</p></div>)}</div>
       <div className="mt-4 rounded-lg border border-timetable-grid p-4 text-sm leading-6 text-muted-foreground"><Sparkles className="mb-2 size-4 text-foreground" />{selected.note}</div>
-      <button className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 text-sm font-medium text-ink-foreground hover:opacity-90"><Bot className="size-4" />Ask AI: Why is this class placed here?</button>
+      <button onClick={handleAskAiExplain} disabled={aiLoading} className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 text-sm font-medium text-ink-foreground hover:opacity-90 disabled:opacity-50">
+        {aiLoading ? <Loader2 className="size-4 animate-spin" /> : <Bot className="size-4" />}
+        Ask AI: Why is this placed here?
+      </button>
     </aside>}
   </main>
 }
@@ -158,13 +508,41 @@ function useNow() {
   return now
 }
 
-function Timetable({ onSelect }: { onSelect: (s: Session) => void }) {
+function Timetable({
+  sessionsList,
+  availableGroups,
+  selectedGroup,
+  onSelectGroup,
+  onSelect
+}: {
+  sessionsList: Session[]
+  availableGroups: string[]
+  selectedGroup: string
+  onSelectGroup: (grp: string) => void
+  onSelect: (s: Session) => void
+}) {
   const [cat, setCat] = useState('All')
   const now = useNow()
   const hours = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => HOUR_START + i)
-  const list = cat === 'All' ? sessions : sessions.filter(s => s.cat === cat)
+  const list = cat === 'All' ? sessionsList : sessionsList.filter(s => s.cat === cat)
+
   return <div>
-    <Heading title="Week 7 · Semester 2027">{categories.map(c => <Pill key={c} active={cat === c} onClick={() => setCat(c)}>{c}</Pill>)}</Heading>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <Heading title="Week 7 · Semester 2027">
+        {categories.map(c => <Pill key={c} active={cat === c} onClick={() => setCat(c)}>{c}</Pill>)}
+      </Heading>
+      <div className="flex items-center gap-2 text-xs">
+        <span className="font-medium text-muted-foreground">Cohort:</span>
+        <select
+          value={selectedGroup}
+          onChange={e => onSelectGroup(e.target.value)}
+          aria-label="Filter student cohort"
+          className="rounded-full border border-timetable-grid bg-card px-3 py-1.5 text-xs font-medium text-foreground outline-none focus:ring-2 focus:ring-ring"
+        >
+          {availableGroups.map(g => <option key={g} value={g}>{g}</option>)}
+        </select>
+      </div>
+    </div>
     <div className="overflow-x-auto"><div className="min-w-[900px]">
       <div className="grid grid-cols-[72px_repeat(5,1fr)] border-b border-timetable-grid text-sm">
         <div className="border-r border-timetable-grid" />{days.map((d, i) => <div key={d} className={`py-1.5 text-center border-r border-timetable-grid last:border-r-0 ${now?.day === i ? 'rounded-full bg-ev-mint text-ev-mint-fg font-medium' : 'text-foreground/80'}`}>{i + 13} - {d}</div>)}
@@ -186,10 +564,7 @@ function Timetable({ onSelect }: { onSelect: (s: Session) => void }) {
   </div>
 }
 
-const status = (s: string) => s === 'Approved' ? 'bg-success-soft text-success' : s === 'Rejected' ? 'bg-danger-soft text-destructive' : 'bg-warning-soft text-warning'
-
-function Fest({ rows, filter, setFilter, onSelect }: { rows: string[][]; filter: string; setFilter: (v: string) => void; onSelect: (r: string[]) => void }) {
-  const stats: [string, string, Hue][] = [['64.5/70', 'Booking score', 'violet'], ['21', 'Approved', 'mint'], ['2', 'Alternatives offered', 'peach'], ['2', 'Rejected', 'rose'], ['0', 'Inversions', 'sky']]
+function Fest({ rows, stats, filter, setFilter, onSelect }: { rows: string[][]; stats: [string, string, Hue][]; filter: string; setFilter: (v: string) => void; onSelect: (r: string[]) => void }) {
   return <div>
     <Heading title="Spectra Fest · Week 7">{['All', 'Approved', 'Alternative Offered', 'Rejected'].map(f => <Pill key={f} active={filter === f} onClick={() => setFilter(f)}>{f}</Pill>)}</Heading>
     <div className="grid gap-3 sm:grid-cols-5">{stats.map(([v, l, h]) => <div key={l} className={`rounded-none border border-timetable-grid p-4 ${hue[h]}`}><p className="text-2xl font-semibold tracking-tight">{v}</p><p className="mt-1 text-xs opacity-80">{l}</p></div>)}</div>
@@ -202,16 +577,16 @@ function Fest({ rows, filter, setFilter, onSelect }: { rows: string[][]; filter:
   </div>
 }
 
-function ExamGrid({ onSelect }: { onSelect: (e: string[]) => void }) {
+function ExamGrid({ list, onSelect }: { list: string[][]; onSelect: (e: string[]) => void }) {
   const [cat, setCat] = useState('All')
-  const list = exams.filter(e => cat === 'All' || e[1] === cat)
+  const filtered = list.filter(e => cat === 'All' || e[1] === cat)
   return <div>
     <Heading title="Midsem Exams · 14–19 Oct">{['All', 'AM', 'PM'].map(c => <Pill key={c} active={cat === c} onClick={() => setCat(c)}>{c === 'All' ? 'All' : c === 'AM' ? 'Morning' : 'Afternoon'}</Pill>)}</Heading>
     <div className="overflow-x-auto"><div className="grid min-w-[860px] grid-cols-[72px_repeat(6,1fr)] border-b border-timetable-grid">
       <div className="border-b border-r border-timetable-grid" />{['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map((d, i) => <div key={d} className="border-b border-r border-timetable-grid py-1.5 text-center text-sm text-foreground/80 last:border-r-0">{14 + i} - {d.charAt(0) + d.slice(1).toLowerCase()}</div>)}
       {['AM', 'PM'].map(slot => <React.Fragment key={slot}>
         <div className="border-b border-r border-timetable-grid pt-3 text-sm text-foreground/80 pr-2 text-right">{slot === 'AM' ? '09:30' : '14:00'}<p className="text-[11px] text-muted-foreground">{slot === 'AM' ? 'to 11:30' : 'to 16:00'}</p></div>
-        {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(d => { const e = list.find(x => x[0] === d && x[1] === slot); return <div key={d} className="min-h-[170px] border-b border-r border-timetable-grid last:border-r-0">{e && <button onClick={() => onSelect(e)} className={`flex h-full w-full flex-col justify-center rounded-none border border-timetable-grid p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md ${hue[slot === 'AM' ? 'sky' : 'violet']}`}>
+        {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(d => { const e = filtered.find(x => x[0] === d && x[1] === slot); return <div key={d} className="min-h-[170px] border-b border-r border-timetable-grid last:border-r-0">{e && <button onClick={() => onSelect(e)} className={`flex h-full w-full flex-col justify-center rounded-none border border-timetable-grid p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md ${hue[slot === 'AM' ? 'sky' : 'violet']}`}>
           <div className="flex items-start justify-between"><span className="text-[13px] font-medium leading-tight">{e[3]}</span><MoreHorizontal className="size-3.5 shrink-0" /></div>
           <span className="text-[11px] opacity-75">{e[2]}</span>
           <span className="mt-2 text-[10px] opacity-75">{e[4]}</span>
@@ -223,27 +598,42 @@ function ExamGrid({ onSelect }: { onSelect: (e: string[]) => void }) {
   </div>
 }
 
-function Disruption({ preview, setPreview, setNotice }: { preview: boolean; setPreview: (v: boolean) => void; setNotice: (v: string) => void }) {
-  const moves = [['SES-04', 'CS204 · Data Structures Lab', 'Mon 12:00–15:00 · LAB-1', 'Mon 12:00–15:00 · LAB-2'], ['SES-05', 'CS207 · AI Fundamentals', 'Tue 09:00 · LAB-1', 'Tue 09:00 · LAB-2'], ['SES-06', 'ME201 · Manufacturing Lab', 'Tue 09:00 · LAB-1', 'Tue 09:00 · LAB-3']]
+function Disruption({ preview, moves, onPreview, onApprove }: { preview: boolean; moves: string[][]; onPreview: () => void; onApprove: () => void }) {
   return <div>
-    <Heading title="Disruption Studio"><Pill active={!preview} onClick={() => setPreview(false)}>Simulation</Pill><Pill active={preview} onClick={() => setPreview(true)}>Preview diff</Pill></Heading>
+    <Heading title="Disruption Studio"><Pill active={!preview} onClick={onPreview}>Simulation</Pill><Pill active={preview} onClick={onPreview}>Preview diff</Pill></Heading>
     <div className={`flex flex-wrap items-center justify-between gap-4 rounded-none border border-timetable-grid p-5 ${hue.periwinkle}`}>
       <div><p className="text-sm font-medium">Simulate or apply campus disruptions</p><p className="mt-1 text-[13px] opacity-75">Faculty leave, room closure, and extra sessions. Active closure: LAB-1.</p></div>
-      <button onClick={() => setPreview(true)} className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground"><GitCompareArrows className="size-4" />Preview disruption diff</button>
+      <button onClick={onPreview} className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground"><GitCompareArrows className="size-4" />Preview disruption diff</button>
     </div>
     {preview ? <>
-      <div className="mt-5 flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-secondary px-3 py-1.5">3 sessions moved</span><span className="rounded-full bg-secondary px-3 py-1.5">0 time changes</span><span className="rounded-full bg-secondary px-3 py-1.5">3 room-only</span></div>
+      <div className="mt-5 flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-secondary px-3 py-1.5">{moves.length} sessions moved</span><span className="rounded-full bg-secondary px-3 py-1.5">0 time changes</span><span className="rounded-full bg-secondary px-3 py-1.5">{moves.length} room-only</span></div>
       <div className="mt-4 grid gap-3 md:grid-cols-3">{moves.map(m => <div key={m[0]} className={`rounded-none border border-timetable-grid p-4 ${hue.sky}`}>
         <div className="flex items-start justify-between"><p className="text-sm font-medium">{m[1]}</p><MoreHorizontal className="size-4 shrink-0" /></div>
         <p className="mt-3 text-xs line-through opacity-60">{m[2]}</p><p className="mt-1 text-[13px]">{m[3]}</p>
         <span className="mt-4 inline-flex items-center gap-1 text-[11px] font-medium opacity-80"><GitCompareArrows className="size-3" />Room reassigned</span>
       </div>)}</div>
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-none border border-timetable-grid bg-warning-soft p-4"><div className="flex items-start gap-2 text-[13px] text-warning"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><span>All proposed room moves preserve capacity and equipment requirements.</span></div><button onClick={() => setNotice('Schedule changes approved and committed.')} className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground">Approve & commit</button></div>
-    </> : <div className="mt-5 grid min-h-56 place-items-center rounded-none border border-dashed border-timetable-grid text-center"><div><SlidersHorizontal className="mx-auto size-6 text-muted-foreground" /><p className="mt-3 text-sm font-medium">Simulation is ready</p><p className="mt-1 text-xs text-muted-foreground">Preview the diff before committing any changes.</p></div></div>}
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-none border border-timetable-grid bg-warning-soft p-4"><div className="flex items-start gap-2 text-[13px] text-warning"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><span>All proposed room moves preserve capacity and equipment requirements.</span></div><button onClick={onApprove} className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground">Approve & commit</button></div>
+    </> : <div className="mt-5 grid min-h-56 place-items-center rounded-none border border-dashed border-timetable-grid text-center"><div><SlidersHorizontal className="mx-auto size-6 text-muted-foreground" /><p className="mt-3 text-sm font-medium">Simulation is ready</p><p className="mt-1 text-xs text-muted-foreground">Click "Preview disruption diff" to run live repair solver.</p></div></div>}
   </div>
 }
 
-function Assistant({ bookingText, setBookingText, parsed, submitBooking }: { bookingText: string; setBookingText: (v: string) => void; parsed: boolean; submitBooking: () => void }) {
+function Assistant({
+  bookingText,
+  setBookingText,
+  parsed,
+  parsedData,
+  submitBooking,
+  confirmBooking,
+  venuesList
+}: {
+  bookingText: string
+  setBookingText: (v: string) => void
+  parsed: boolean
+  parsedData: any
+  submitBooking: () => void
+  confirmBooking: () => void
+  venuesList: [string, string, string][]
+}) {
   return <div>
     <Heading title="AI Booking Assistant" />
     <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
@@ -254,16 +644,23 @@ function Assistant({ bookingText, setBookingText, parsed, submitBooking }: { boo
           <textarea id="booking-request" value={bookingText} onChange={e => setBookingText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitBooking() } }} className="min-h-28 w-full resize-none rounded-lg border border-timetable-grid bg-muted p-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring" placeholder="e.g. 'seminar hall kal shaam 6 baje, 2 ghante, 100 log, mic chahiye'" />
           <div className="mt-3 flex items-center justify-between"><span className="text-xs text-muted-foreground"><Command className="mr-1 inline size-3" />Enter to parse</span><button onClick={submitBooking} className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground"><Send className="size-3.5" />Parse request</button></div>
           {parsed && <div className="mt-6 rounded-lg border border-timetable-grid">
-            <div className="flex items-center justify-between border-b border-timetable-grid p-4"><div><p className="text-sm font-medium">Parsed booking request</p><p className="mt-1 text-xs text-muted-foreground">Review fields before submitting.</p></div><Confirmed /></div>
-            <div className="grid gap-4 p-4 sm:grid-cols-2">{[['Title', bookingText || 'Seminar Hall Request'], ['Attendance', '100 people'], ['Duration', '2 hours'], ['Day', 'Tomorrow'], ['Start', '18:00'], ['Requested room', 'Seminar Hall']].map(([l, v]) => <label key={l} className="text-xs text-muted-foreground">{l}<input defaultValue={v} className="mt-1.5 w-full rounded-md border border-timetable-grid px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring" /></label>)}</div>
-            <div className="flex flex-wrap gap-2 border-t border-timetable-grid p-4">{['Projector', 'PA System', 'Stage', 'Accessible'].map(n => <label key={n} className="flex items-center gap-2 rounded-full bg-secondary px-3 py-1.5 text-xs"><input type="checkbox" defaultChecked={n === 'PA System'} className="accent-foreground" />{n}</label>)}</div>
-            <div className="flex justify-end gap-2 border-t border-timetable-grid p-4"><button className="rounded-full bg-secondary px-4 py-2 text-sm">Edit fields</button><button className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground">Submit booking</button></div>
+            <div className="flex items-center justify-between border-b border-timetable-grid p-4"><div><p className="text-sm font-medium">Parsed booking request</p><p className="mt-1 text-xs text-muted-foreground">Review fields before submitting to live DBMS.</p></div><Confirmed /></div>
+            <div className="grid gap-4 p-4 sm:grid-cols-2">{[
+              ['Title', parsedData?.title || bookingText || 'Seminar Hall Request'],
+              ['Attendance', `${parsedData?.attendance || 100} people`],
+              ['Duration', `${parsedData?.duration_periods || 2} hours`],
+              ['Day', parsedData?.windows?.[0]?.day || 'Tomorrow'],
+              ['Start', parsedData?.windows?.[0]?.start_time || '18:00'],
+              ['Requested room', parsedData?.requested_room || 'Seminar Hall']
+            ].map(([l, v]) => <label key={l} className="text-xs text-muted-foreground">{l}<input defaultValue={v} className="mt-1.5 w-full rounded-md border border-timetable-grid px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring" /></label>)}</div>
+            <div className="flex flex-wrap gap-2 border-t border-timetable-grid p-4">{['Projector', 'PA System', 'Stage', 'Accessible'].map(n => <label key={n} className="flex items-center gap-2 rounded-full bg-secondary px-3 py-1.5 text-xs"><input type="checkbox" defaultChecked={n === 'PA System' || (parsedData?.needs || []).includes(n.toLowerCase().replace(' ', '_'))} className="accent-foreground" />{n}</label>)}</div>
+            <div className="flex justify-end gap-2 border-t border-timetable-grid p-4"><button onClick={() => setBookingText('')} className="rounded-full bg-secondary px-4 py-2 text-sm">Clear</button><button onClick={confirmBooking} className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground">Submit booking</button></div>
           </div>}
         </div>
       </Panel>
       <div className="flex flex-col gap-4">
         <Panel className="p-5"><div className="flex items-center gap-2 text-sm font-medium"><MessageSquareText className="size-4" />Recent requests</div><div className="mt-4 flex flex-col gap-2">{([['Seminar Hall · tomorrow 18:00', 'mint'], ['Auditorium · Fri 09:00', 'peach'], ['LH-2 · next Monday', 'sky']] as [string, Hue][]).map(([t, h]) => <div key={t} className={`rounded-none border border-timetable-grid p-3 ${hue[h]}`}><p className="text-[13px] font-medium">{t}</p><p className="mt-0.5 text-[11px] opacity-75">Awaiting approval</p></div>)}</div></Panel>
-        <Panel className="p-5"><div className="flex items-center gap-2 text-sm font-medium"><Pencil className="size-4" />Available venues</div><div className="mt-4 flex flex-col gap-2 text-[13px]">{[['AUD', '420 seats', 'Available'], ['SEM-HALL', '120 seats', 'Available'], ['LH-1', '90 seats', 'Booked 18:00']].map(v => <div key={v[0]} className="flex items-center justify-between rounded-md bg-muted px-3 py-2"><span><b className="font-medium">{v[0]}</b><span className="ml-2 text-muted-foreground">{v[1]}</span></span><span className={`rounded-full px-2 py-0.5 text-[11px] ${v[2] === 'Available' ? 'bg-success-soft text-success' : 'bg-warning-soft text-warning'}`}>{v[2]}</span></div>)}</div></Panel>
+        <Panel className="p-5"><div className="flex items-center gap-2 text-sm font-medium"><Pencil className="size-4" />Available venues</div><div className="mt-4 flex flex-col gap-2 text-[13px]">{venuesList.map(v => <div key={v[0]} className="flex items-center justify-between rounded-md bg-muted px-3 py-2"><span><b className="font-medium">{v[0]}</b><span className="ml-2 text-muted-foreground">{v[1]}</span></span><span className={`rounded-full px-2 py-0.5 text-[11px] ${v[2] === 'Available' ? 'bg-success-soft text-success' : 'bg-warning-soft text-warning'}`}>{v[2]}</span></div>)}</div></Panel>
       </div>
     </div>
   </div>

@@ -133,7 +133,7 @@ def read_root():
 
 @app.get("/api/meta")
 def get_metadata():
-    """Returns lists of student groups, faculty, and rooms for frontend dropdowns."""
+    """Returns lists of student groups, faculty, rooms, and courses for frontend dropdowns."""
     d = STATE["data"]
     return {
         "days": d["calendar"]["days"],
@@ -141,6 +141,7 @@ def get_metadata():
         "groups": d["student_groups"],
         "faculty": [{"id": f["id"], "name": f["name"], "department": f["department"]} for f in d["faculty"]],
         "rooms": d["rooms"],
+        "courses": d.get("courses", []),
         "active_view": STATE["active_view"]
     }
 
@@ -155,6 +156,7 @@ def get_schedule(
     """Returns timetable sessions filtered by group, faculty, or room."""
     target_sched = STATE["schedule_after"] if (view == "after_disruption" or STATE["active_view"] == "after_disruption") and STATE["schedule_after"] else STATE["schedule"]
     sessions_data = {s["id"]: s for s in STATE["data"]["sessions"]}
+    courses_data = {c["id"]: c for c in STATE["data"].get("courses", [])}
 
     results = []
     for s_entry in target_sched.get("sessions", []):
@@ -168,9 +170,14 @@ def get_schedule(
         if room_id and s_entry.get("room_id") != room_id:
             continue
 
+        cid = meta.get("course_id", "")
+        cmeta = courses_data.get(cid, {})
+
         results.append({
             **s_entry,
-            "course_id": meta.get("course_id"),
+            "course_id": cid,
+            "course_title": cmeta.get("title", cid),
+            "department": cmeta.get("department", "Computing"),
             "kind": meta.get("kind"),
             "faculty_id": meta.get("faculty_id"),
             "groups": meta.get("groups", []),
