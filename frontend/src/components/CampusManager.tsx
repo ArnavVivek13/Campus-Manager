@@ -225,10 +225,33 @@ export default function CampusManager() {
     ['SEM-HALL', '120 seats', 'Available'],
     ['LH-1', '90 seats', 'Booked 18:00'],
   ])
-  const [activeView, setActiveView] = useState<'baseline' | 'after_disruption'>((localStorage.getItem('active_view') as any) || 'baseline')
+  const [activeView, setActiveView] = useState<'baseline' | 'after_disruption'>('baseline')
 
-  useEffect(() => { setDark(localStorage.getItem('theme') === 'dark') }, [])
-  useEffect(() => { document.documentElement.classList.toggle('dark', dark); localStorage.setItem('theme', dark ? 'dark' : 'light') }, [dark])
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('active_view') as any
+        if (saved) setActiveView(saved)
+      } catch {}
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        setDark(localStorage.getItem('theme') === 'dark')
+      } catch {}
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        document.documentElement.classList.toggle('dark', dark)
+        localStorage.setItem('theme', dark ? 'dark' : 'light')
+      } catch {}
+    }
+  }, [dark])
 
   // Verify stored JWT authentication on mount
   useEffect(() => {
