@@ -1,6 +1,6 @@
 import React from 'react'
-import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Bot, CalendarDays, Check, ChevronRight, CircleCheck, Clock3, Command, DoorOpen, GitCompareArrows, GraduationCap, MessageSquareText, MoreHorizontal, PanelLeft, Pencil, RotateCcw, Send, SlidersHorizontal, Sparkles, Users, X, Menu, Moon, Sun, Loader2, History, CheckCircle2, XCircle, ArrowRight, LogOut, Lock, Mail, Eye, EyeOff, ShieldCheck, UserPlus } from 'lucide-react'
+import { useEffect, useMemo, useState, useRef } from 'react'
+import { AlertTriangle, Bot, CalendarDays, Check, ChevronRight, CircleCheck, Clock3, Command, DoorOpen, GitCompareArrows, GraduationCap, MessageSquareText, MoreHorizontal, PanelLeft, Pencil, RotateCcw, Send, SlidersHorizontal, Sparkles, Users, X, Menu, Moon, Sun, Loader2, History, CheckCircle2, XCircle, ArrowRight, LogOut, Lock, Mail, Eye, EyeOff, ShieldCheck, UserPlus, Download, Upload } from 'lucide-react'
 
 const API_BASE = 'http://127.0.0.1:8000'
 
@@ -167,9 +167,11 @@ export default function CampusManager() {
   const [statusFilter, setStatusFilter] = useState('All')
   const [disruptionPreview, setDisruptionPreview] = useState(false)
   const [notice, setNotice] = useState('')
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(true)
   const [dark, setDark] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
+  const [datasetLoading, setDatasetLoading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Live Backend State
   const [sessionsList, setSessionsList] = useState<Session[]>(defaultSessions)
@@ -449,13 +451,49 @@ export default function CampusManager() {
         setActiveView('baseline')
         localStorage.setItem('active_view', 'baseline')
         setDisruptionPreview(false)
-        setNotice('Demo data reset to the Semester 2027 baseline.')
-        fetchSchedule(selectedGroup, 'baseline')
+        setNotice('All data cleared and reset to Semester 2027 baseline.')
+        const val = filterType === 'group' ? selectedGroup : filterType === 'faculty' ? selectedFaculty : selectedRoom
+        fetchSchedule(filterType, val, 'baseline')
+        fetchExams()
+        fetchBookings()
       }
     } catch {
       setActiveView('baseline')
       localStorage.setItem('active_view', 'baseline')
-      setNotice('Demo data reset to the Semester 2027 baseline.')
+      setNotice('All data cleared and reset to Semester 2027 baseline.')
+    }
+  }
+
+  const handleExportSchedule = () => {
+    window.open(`${API_BASE}/api/export/schedule`, '_blank')
+  }
+
+  const handleLoadDataset = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setDatasetLoading(true)
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/load-dataset`, {
+        method: 'POST',
+        body: formData
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.detail || 'Failed to load dataset.')
+      }
+      setNotice(`${data.message || 'Dataset loaded.'} Timetable verified with 0 hard violations.`)
+      const val = filterType === 'group' ? selectedGroup : filterType === 'faculty' ? selectedFaculty : selectedRoom
+      fetchSchedule(filterType, val, 'baseline')
+      fetchExams()
+      fetchBookings()
+      fetchMetadata()
+    } catch (err: any) {
+      alert(err.message || 'Error loading dataset file.')
+    } finally {
+      setDatasetLoading(false)
+      if (e.target) e.target.value = ''
     }
   }
 
@@ -715,15 +753,42 @@ export default function CampusManager() {
   }
 
   return <main className="min-h-screen bg-canvas p-3 text-foreground lg:p-6">
-    <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-[1600px] gap-3 rounded-md grad-shell p-3">
-      {menuOpen && <div className="fixed inset-0 z-30 bg-foreground/30 lg:hidden" onClick={() => setMenuOpen(false)} />}
-      <aside className={`${menuOpen ? 'fixed inset-y-0 left-0 z-40 flex grad-shell shadow-2xl overflow-y-auto' : 'hidden'} w-64 shrink-0 flex-col px-4 py-4 lg:static lg:z-auto lg:flex lg:shadow-none overflow-y-auto max-h-[calc(100vh-3rem)]`}>
-        <div className="flex items-center justify-between">
-          <div className="grid size-10 place-items-center rounded-lg bg-ink text-[11px] font-bold text-ink-foreground">CIT</div>
-          <button onClick={() => setMenuOpen(false)} aria-label="Close menu" className="lg:pointer-events-none"><PanelLeft className="size-5 text-foreground/70" /></button>
+    <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-[1600px] gap-4 relative items-start">
+      {menuOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-foreground/30 lg:hidden"
+          onClick={() => setMenuOpen(false)}
+        />
+      )}
+
+      {/* Floating Green Gradient Menu */}
+      <aside
+        className={`fixed inset-y-3 left-3 z-40 flex flex-col grad-shell rounded-2xl border border-timetable-grid shadow-2xl transition-all duration-300 ease-in-out lg:static lg:inset-auto lg:max-h-[calc(100vh-3rem)] ${
+          menuOpen
+            ? 'w-64 p-4 opacity-100 translate-x-0'
+            : 'w-0 p-0 opacity-0 -translate-x-full lg:w-0 lg:p-0 lg:opacity-0 pointer-events-none border-transparent'
+        } overflow-y-auto overflow-x-hidden shrink-0`}
+      >
+        <div className="flex items-center justify-between shrink-0">
+          <div className="grid size-10 place-items-center rounded-lg bg-ink text-[11px] font-bold text-ink-foreground shadow-sm">
+            CIT
+          </div>
+          <button
+            onClick={() => setMenuOpen(false)}
+            aria-label="Close menu"
+            className="rounded-full p-1.5 hover:bg-card/50 text-foreground/70 hover:text-foreground transition"
+            title="Collapse menu"
+          >
+            <PanelLeft className="size-5" />
+          </button>
         </div>
-        <p className="mt-9 mb-3 text-sm text-muted-foreground">Main menu</p>
-        <nav className="flex flex-col gap-1" role="tablist">
+
+        <p className="mt-6 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider shrink-0">
+          Main menu
+        </p>
+
+        {/* Navigation list */}
+        <nav className="flex flex-col gap-1 shrink-0" role="tablist">
           {accessibleTabs.map(tab => {
             const Icon = tab.icon
             const isSelected = activeTab === tab.tabIndex
@@ -734,11 +799,13 @@ export default function CampusManager() {
                 aria-selected={isSelected}
                 onClick={() => {
                   setActiveTab(tab.tabIndex)
-                  setMenuOpen(false)
+                  if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+                    setMenuOpen(false)
+                  }
                 }}
                 className={`flex items-center gap-3 rounded-full px-4 py-2.5 text-left text-sm transition ${
                   isSelected
-                    ? 'bg-card/80 font-medium shadow-sm'
+                    ? 'bg-card/90 font-medium shadow-sm'
                     : 'text-foreground/80 hover:bg-card/50'
                 }`}
               >
@@ -749,17 +816,22 @@ export default function CampusManager() {
           })}
         </nav>
 
-        <div className="mt-auto pt-6 flex flex-col gap-3">
-          <button onClick={resetDemo} className="flex w-full items-center gap-3 rounded-full px-4 py-2 text-[13px] text-destructive hover:bg-card/50 transition">
-            <RotateCcw className="size-3.5" />
-            Reset Demo Data
+        {/* Directly underneath the AI booking assistant button - stays in sequence during scroll */}
+        <div className="mt-4 pt-3 border-t border-timetable-grid/50 flex flex-col gap-2.5 shrink-0">
+          <button
+            onClick={resetDemo}
+            className="flex w-full items-center gap-2 rounded-xl border border-timetable-grid bg-card/60 px-3 py-2 text-xs font-medium text-foreground hover:bg-card hover:text-destructive transition"
+            title="Clear live session edits and reset to baseline timetable"
+          >
+            <RotateCcw className="size-3.5 text-muted-foreground" />
+            <span>Clear Data</span>
           </button>
-          
-          {/* Consolidated, interactable user card */}
-          <div className="rounded-xl border border-timetable-grid bg-card/70 p-3 shadow-sm">
+
+          {/* User Account Card */}
+          <div className="rounded-xl border border-timetable-grid bg-card/80 p-3 shadow-sm">
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-ink text-xs font-bold text-ink-foreground shadow-sm">
+                <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-ink text-xs font-bold text-ink-foreground shadow-sm">
                   {currentUser.full_name?.slice(0, 2).toUpperCase() || 'CI'}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -798,19 +870,71 @@ export default function CampusManager() {
                   {currentUser.role}
                 </span>
               </div>
-              <span className="text-muted-foreground truncate max-w-[120px]" title={currentUser.department || 'Academic Affairs'}>
+              <span className="text-muted-foreground truncate max-w-[110px]" title={currentUser.department || 'Academic Affairs'}>
                 {currentUser.department || 'Academic Affairs'}
               </span>
             </div>
           </div>
+
+          {/* Admin Dataset Operations: Load & Export */}
+          {currentUser.role === 'ADMIN' && (
+            <div className="rounded-xl border border-timetable-grid bg-card/60 p-2.5 flex flex-col gap-1.5">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Dataset & Schedule
+              </p>
+              
+              <button
+                onClick={handleExportSchedule}
+                className="flex w-full items-center justify-between rounded-lg bg-secondary/80 px-2.5 py-1.5 text-[11px] font-medium hover:bg-accent transition"
+                title="Download verified schedule.json file"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Download className="size-3 text-muted-foreground" />
+                  <span>Export schedule.json</span>
+                </span>
+                <span className="text-[10px] text-muted-foreground font-mono">.json</span>
+              </button>
+
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={datasetLoading}
+                className="flex w-full items-center justify-between rounded-lg bg-secondary/80 px-2.5 py-1.5 text-[11px] font-medium hover:bg-accent transition disabled:opacity-50"
+                title="Load starter pack dataset JSON"
+              >
+                <span className="flex items-center gap-1.5">
+                  {datasetLoading ? (
+                    <Loader2 className="size-3 animate-spin text-muted-foreground" />
+                  ) : (
+                    <Upload className="size-3 text-muted-foreground" />
+                  )}
+                  <span>{datasetLoading ? 'Solving...' : 'Load Dataset JSON'}</span>
+                </span>
+                <span className="text-[10px] text-muted-foreground font-mono">Upload</span>
+              </button>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                className="hidden"
+                onChange={handleLoadDataset}
+              />
+            </div>
+          )}
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1 rounded-lg bg-card p-3 lg:p-4">
+      <div className="min-w-0 flex-1 rounded-2xl border border-timetable-grid bg-card p-3 lg:p-4 shadow-sm transition-all duration-300">
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-timetable-grid px-4 py-2.5 text-sm">
           <div className="flex items-center gap-2">
-            <button onClick={() => setMenuOpen(true)} aria-label="Open menu" className="-ml-1 rounded-full p-1.5 hover:bg-accent lg:hidden">
-              <Menu className="size-5" />
+            <button
+              onClick={() => setMenuOpen(o => !o)}
+              aria-label="Toggle menu"
+              className="flex items-center gap-1.5 rounded-full border border-timetable-grid bg-secondary/80 px-2.5 py-1 text-xs font-medium hover:bg-accent transition shadow-sm"
+              title={menuOpen ? 'Hide Menu' : 'Show Menu'}
+            >
+              <PanelLeft className="size-3.5" />
+              <span>{menuOpen ? 'Hide Menu' : 'Menu'}</span>
             </button>
             <span className="text-muted-foreground">CIT Campus</span>
             <ChevronRight className="size-3.5 text-muted-foreground" />
@@ -827,6 +951,17 @@ export default function CampusManager() {
               <span className="rounded-full bg-warning-soft px-2 py-0.5 text-warning font-medium">
                 Repaired View
               </span>
+            )}
+
+            {currentUser.role === 'ADMIN' && (
+              <button
+                onClick={handleExportSchedule}
+                className="hidden md:flex items-center gap-1.5 rounded-full border border-timetable-grid bg-secondary/80 px-2.5 py-1 text-xs font-medium hover:bg-accent transition"
+                title="Export schedule.json"
+              >
+                <Download className="size-3.5" />
+                <span>Export schedule.json</span>
+              </button>
             )}
 
             {/* Dark mode switch */}

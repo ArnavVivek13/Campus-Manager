@@ -8,7 +8,7 @@ import json
 import os
 import sys
 from typing import Dict, Any, Optional, List
-from fastapi import FastAPI, HTTPException, Query, Depends, status
+from fastapi import FastAPI, HTTPException, Query, Depends, status, UploadFile, File, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -488,6 +488,105 @@ def reset_demo_data():
         "status": "success",
         "message": "All demo data and timetable states have been reset to initial baseline."
     }
+
+
+@app.get("/api/export/schedule")
+def export_schedule_endpoint():
+    """
+    Exports the current clash-free timetable, midsem exams, and fest bookings
+    as schedule.json conforming to official CrunchWeek specifications.
+    """
+    target_sched = STATE["schedule_after"] if STATE.get("active_view") == "after_disruption" else STATE["schedule"]
+    sched_json = json.dumps(target_sched, indent=2)
+    return Response(
+        content=sched_json,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": 'attachment; filename="schedule.json"',
+            "Access-Control-Expose-Headers": "Content-Disposition"
+        }
+    )
+
+
+@app.post("/api/admin/load-dataset")
+async def load_dataset_endpoint(file: UploadFile = File(None)):
+    """
+    Allows Admin to upload a new dataset JSON file conforming to starter pack schema.
+    Validates, re-solves clash-free timetable, exams, and bookings, and updates live state.
+    """
+    if not file:
+        raise HTTPException(status_code=400, detail="No dataset file provided.")
+    
+    try:
+        content = await file.read()
+        new_data = json.loads(content.decode("utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON file format: {str(e)}")
+
+    required_keys = ["dataset_id", "rooms", "faculty", "courses", "student_groups", "sessions"]
+    for k in required_keys:
+        if k not in new_data:
+            raise HTTPException(status_code=422, detail=f"Missing required dataset section: '{k}'")
+
+    try:
+        # Solve Master Timetable
+        t_solver = TimetableSolver(new_data, time_limit_seconds=30.0)
+        t_res = t_solver.solve()
+        if not t_res["solvable"]:
+            raise HTTPException(status_code=422, detail=f"Dataset is unsolvable with 0 hard violations: {t_res.get('conflicts')}")
+        assign = t_res["assignment"]
+
+        # Solve Exams
+        e_solver = ExamSolver(new_data, time_limit_seconds=15.0)
+        exams = e_solver.solve()
+
+        # Solve Bookings
+        b_solver = BookingSolver(new_data, assign)
+        fest_week = b_solver.solve()
+
+        new_schedule = {
+            "team": "Zephyr",
+            "dataset_id": new_data["dataset_id"],
+            "sessions": [
+                {
+                    "session_id": sid,
+                    "day": val["day"],
+                    "start_period": val["start_period"],
+                    "room_id": val["room_id"]
+                }
+                for sid, val in assign.items()
+            ],
+            "fest_week": fest_week,
+            "exams": exams
+        }
+
+        # Update in-memory state
+        STATE["data"] = copy.deepcopy(new_data)
+        STATE["baseline_data"] = copy.deepcopy(new_data)
+        STATE["schedule"] = copy.deepcopy(new_schedule)
+        STATE["baseline_schedule"] = copy.deepcopy(new_schedule)
+        STATE["active_view"] = "baseline"
+        STATE["disruption_pending"] = None
+        STATE["disruption_diff"] = None
+
+        # Write to exports
+        os.makedirs("exports", exist_ok=True)
+        with open(SCHEDULE_PATH, "w", encoding="utf-8") as f:
+            json.dump(new_schedule, f, indent=2)
+
+        return {
+            "status": "success",
+            "message": f"Dataset '{new_data['dataset_id']}' loaded and solved successfully.",
+            "metrics": {
+                "sessions_scheduled": len(new_schedule["sessions"]),
+                "exams_scheduled": len(new_schedule["exams"]),
+                "bookings_approved": sum(1 for b in fest_week.get("bookings", []) if b.get("status") == "approved")
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Solver execution failed: {str(e)}")
 
 
 @app.get("/api/validator/report")
