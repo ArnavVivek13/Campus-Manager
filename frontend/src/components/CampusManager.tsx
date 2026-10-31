@@ -171,6 +171,7 @@ export default function CampusManager() {
   const [dark, setDark] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
   const [datasetLoading, setDatasetLoading] = useState(false)
+  const [disruptionLoading, setDisruptionLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Live Backend State - Initialized empty by default as requested
@@ -590,6 +591,7 @@ export default function CampusManager() {
       setDisruptionPreview(false)
       return
     }
+    setDisruptionLoading(true)
     // First time: fetch the simulation diff from backend
     try {
       const res = await fetch(`${API_BASE}/api/disruption/preview`, { method: 'POST' })
@@ -608,6 +610,8 @@ export default function CampusManager() {
       setDisruptionPreview(true)
     } catch {
       setDisruptionPreview(true)
+    } finally {
+      setDisruptionLoading(false)
     }
   }
 
@@ -616,6 +620,7 @@ export default function CampusManager() {
     if (!file) return
     const formData = new FormData()
     formData.append('file', file)
+    setDisruptionLoading(true)
     try {
       const res = await fetch(`${API_BASE}/api/disruption/upload`, {
         method: 'POST',
@@ -637,6 +642,7 @@ export default function CampusManager() {
     } catch (err: any) {
       showToast(err.message || 'Error processing disruption', 'error')
     } finally {
+      setDisruptionLoading(false)
       if (e.target) e.target.value = ''
     }
   }
@@ -1145,6 +1151,7 @@ export default function CampusManager() {
               onRollback={handleRollback}
               availableRooms={availableRooms}
               onUploadDisruption={handleUploadDisruption}
+              isLoading={disruptionLoading}
             />
           )}
           {activeTab === 4 && <Assistant bookingText={bookingText} setBookingText={setBookingText} parsed={parsed} parsedData={parsedData} submitBooking={submitBooking} confirmBooking={confirmBookingDb} venuesList={venuesList} />}
@@ -1571,7 +1578,8 @@ function Disruption({
   history,
   onRollback,
   availableRooms,
-  onUploadDisruption
+  onUploadDisruption,
+  isLoading
 }: {
   preview: boolean
   moves: string[][]
@@ -1586,6 +1594,7 @@ function Disruption({
   onRollback: (logId: number) => void
   availableRooms: string[]
   onUploadDisruption?: (e: React.ChangeEvent<HTMLInputElement>) => void
+  isLoading?: boolean
 }) {
   const [activeSubTab, setActiveSubTab] = useState<'simulation' | 'history'>('simulation')
   const [busy, setBusy] = useState(false)
@@ -1670,20 +1679,22 @@ function Disruption({
             <div className="flex items-center gap-2">
               <label className="flex items-center gap-1.5 rounded-full border border-timetable-grid bg-card px-3.5 py-2 text-xs font-semibold text-foreground hover:bg-muted transition cursor-pointer shadow-sm">
                 <Upload className="size-3.5 text-muted-foreground" />
-                <span>Upload Disruption JSON</span>
+                <span>{isLoading ? 'Solving Disruption...' : 'Upload Disruption JSON'}</span>
                 <input
                   type="file"
                   accept=".json"
                   className="hidden"
                   onChange={onUploadDisruption}
+                  disabled={isLoading}
                 />
               </label>
               <button
                 onClick={onPreview}
-                className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition"
+                disabled={isLoading}
+                className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition disabled:opacity-50"
               >
                 <GitCompareArrows className="size-4" />
-                {preview ? 'Hide diff' : 'Simulate LAB-1 Closure'}
+                {isLoading ? 'Calculating Minimal Moves...' : preview ? 'Hide diff' : 'Simulate LAB-1 Closure'}
               </button>
             </div>
           </div>

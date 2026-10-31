@@ -382,7 +382,7 @@ def preview_sample_disruption(db: Session = Depends(get_db)):
         for s in STATE["schedule"].get("sessions", [])
     }
 
-    t_solver = TimetableSolver(dis_data, time_limit_seconds=25.0)
+    t_solver = TimetableSolver(dis_data, time_limit_seconds=10.0, num_workers=8)
     re_res = t_solver.solve(baseline=baseline_tuples, stability_weight_time=100000, stability_weight_room=1000)
     if not re_res["solvable"]:
         raise HTTPException(status_code=422, detail="Sample disruption could not be resolved without hard clashes.")
@@ -461,7 +461,7 @@ async def upload_disruption_endpoint(file: UploadFile = File(None), db: Session 
             for s in STATE["schedule"].get("sessions", [])
         }
 
-        t_solver = TimetableSolver(dis_data, time_limit_seconds=25.0)
+        t_solver = TimetableSolver(dis_data, time_limit_seconds=10.0, num_workers=8)
         re_res = t_solver.solve(baseline=baseline_tuples, stability_weight_time=100000, stability_weight_room=1000)
         if not re_res["solvable"]:
             raise HTTPException(status_code=422, detail="Disruption could not be resolved without constraint clashes.")
