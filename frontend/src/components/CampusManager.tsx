@@ -390,7 +390,8 @@ export default function CampusManager() {
       if (Array.isArray(data.bookings)) {
         const mapped = data.bookings.map((b: any) => {
           const req = b.request || {}
-          const statusLabel = b.status === 'approved' ? 'Approved' : b.status === 'alternative_offered' ? 'Alternative Offered' : 'Rejected'
+          const statusLower = (b.status || 'pending').toLowerCase()
+          const statusLabel = statusLower === 'approved' ? 'Approved' : statusLower === 'alternative_offered' ? 'Alternative Offered' : statusLower === 'pending' ? 'Pending Approval' : 'Rejected'
           const slot = b.day ? `${b.day}, Period ${b.start_period || 4}–${b.end_period || 5}` : req.windows?.[0] ? `${req.windows[0].day}, P${req.windows[0].from_period}` : 'Fest Week'
           const venue = b.room_id ? `${b.room_id} · ${b.day || ''}` : '—'
           return [
@@ -459,14 +460,23 @@ export default function CampusManager() {
   const confirmBookingDb = async () => {
     try {
       const token = localStorage.getItem('auth_token')
+      const firstWin = parsedData?.windows?.[0]
       const payload = {
         requester: 'Campus User',
-        title: parsedData?.title || bookingText || 'Seminar Booking',
+        title: parsedData?.title || bookingText || 'Event Request',
         attendance: parsedData?.attendance || 100,
-        windows: [{ day: parsedData?.windows?.[0]?.day || 'Wed', start_time: '18:00' }],
-        requested_room: parsedData?.requested_room || 'SEM-HALL'
+        duration_periods: parsedData?.duration_periods || 1,
+        windows: [{
+          day: firstWin?.day || 'WED',
+          from_period: firstWin?.from_period || 10,
+          to_period: firstWin?.to_period || 11,
+          start_time: firstWin?.start_time || '18:00'
+        }],
+        room_types: parsedData?.room_types || ['auditorium', 'seminar_hall'],
+        needs: parsedData?.needs || [],
+        requested_room: parsedData?.requested_room || 'AUD'
       }
-      await fetch(`${API_BASE}/api/db/bookings`, {
+      const res = await fetch(`${API_BASE}/api/db/bookings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -474,10 +484,17 @@ export default function CampusManager() {
         },
         body: JSON.stringify(payload)
       })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.detail || 'Failed to submit booking')
+      }
       setNotice('Booking proposal successfully saved into live SQL database.')
+      showToast('Booking submitted and awaiting admin approval!', 'success')
+      setParsed(false)
+      setBookingText('')
       fetchBookings()
-    } catch {
-      setNotice('Booking submitted in local offline mode.')
+    } catch (err: any) {
+      showToast(err.message || 'Error submitting booking', 'error')
     }
   }
 
