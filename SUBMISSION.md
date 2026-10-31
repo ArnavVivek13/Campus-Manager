@@ -17,32 +17,35 @@ Chilika Institute of Technology (CIT) faces complex operational scheduling chall
 
 ### How Zephyr Solves This:
 - **Optimization Core:** Built on Google OR-Tools CP-SAT solver, achieving **0 hard violations (25/25 marks)** and theoretical minimum moves during disruptions (17 moved, only 1 time-shifted).
-- **Institutional Access & RBAC:** Enforces strict role-based access control. Public self-signup is disabled to prevent unauthorized access. The Administrator can add single users or batch-import user rosters.
+- **Institutional Access & RBAC:** Enforces strict role-based access control. Users can request accounts with their chosen role (Student, Faculty, Coordinator, Club Representative), which enter a pending approval queue for Administrator verification before activation.
 - **Dynamic Semester Timetable:** Distinct normal teaching weeks (Weeks 1–6, 9–16), Spectra Fest (Week 7), and Midsem Exams (Week 8) with dynamic dates.
 - **Live IST Clock Indicator:** Real-time red indicator line tracking active classes on the timetable grid according to IST timezone.
-- **AI Booking Assistant:** Parses English/Hinglish requests via Google Gemini 2.5 Flash, backed by deterministic rule-based fallback when offline.
+- **AI Booking Assistant:** Parses English/Hinglish requests via Google Gemini 2.5 Flash, backed by deterministic rule-based fallback when offline, with duplicate booking prevention.
+- **Spectra Fest Review Workflow:** Admin & Coordinator side drawer with one-click **Approve**, **Reject**, or **Offer Alternative** (specifying venue and justification notes).
 - **Data Lifecycle Controls:** Clean empty initial state, 1-click baseline restoration, dataset JSON upload & solve, full clear-data wipe, and direct `schedule.json` export.
 
 ---
 
 ## 2. Evaluation & Demo Credentials
 
-Public registration is disabled to prevent unauthorized account creation. Evaluators can sign in using the seeded default administrator account:
+Users can either request their own account via the **"Request Account"** tab on the login screen, or sign in immediately using pre-provisioned demo accounts:
 
 | Account | Email | Password | Role | Access Level |
 | :--- | :--- | :--- | :--- | :--- |
 | **Administrator (Dean)** | `admin@cit.edu` | `Admin@123` | `ADMIN` | Full control: Timetable, Fest, Exams, Disruption Studio, User Management, Dataset Load/Export/Clear. |
+| **Faculty Member** | `faculty@cit.edu` | `Faculty@123` | `FACULTY` | Timetable inspection, booking requests, coordinator reviews. |
+| **Club Representative** | `club@cit.edu` | `Club@123` | `CLUB_LEAD` | AI Booking Assistant, Spectra Fest venue requests. |
+| **Student** | `student@cit.edu` | `Student@123` | `STUDENT` | Timetable matrix viewing, exam schedule check, festival schedule. |
 
-*Note: On the login screen, clicking the **"Fill Default Admin"** button instantly populates these credentials for quick evaluation.*
+*Note: On the login screen, clicking any of the **"Quick Demo Sign In"** cards instantly populates those credentials.*
 
-### Provisioning Other Test Users (Faculty, Club, Student)
-1. Sign in as `admin@cit.edu`.
-2. Click the **User Management** tab in the sidebar.
-3. Click **"Batch Import Users"** -> **"Load Sample Roster Template"** -> **"Import Accounts"**.
-4. This instantly provisions:
-   - `faculty@cit.edu` / `Faculty@123` (Faculty role)
-   - `club@cit.edu` / `Club@123` (Club Representative role)
-   - `student@cit.edu` / `Student@123` (Student role)
+### Reviewing & Approving User Registration Requests
+1. When a new user submits the **"Request Account"** form, their account is held in `is_active = false`.
+2. Sign in as `admin@cit.edu`.
+3. Open the **User Management** tab (`activeTab 5`).
+4. In the **Pending Account Approvals** queue at the top:
+   - Click **Approve** to activate the account and grant immediate role-based platform access.
+   - Click **Decline** to reject and delete unauthorized requests.
 
 ---
 
@@ -55,8 +58,9 @@ Public registration is disabled to prevent unauthorized account creation. Evalua
 | **Admin Load Dataset** | `POST /api/admin/load-dataset` validates JSON and re-solves clash-free schedule with CP-SAT. | ✅ Verified |
 | **Admin Clear Data** | `POST /api/admin/clear-data` clears all operational records from database and memory. | ✅ Verified |
 | **Export `schedule.json`** | `GET /api/export/schedule` exports official JSON conforming to starter pack schema with attachment header. | ✅ Verified |
-| **User Access Control** | Public signup disabled; admin can add single or batch roster lists with roles. | ✅ Verified |
-| **Automated Tests** | 6 Pytest unit tests verifying routes, RBAC, export, and user management (`pytest backend/tests/test_api.py`). | ✅ 100% Passed |
+| **User Access Control** | Self-registration with role selection + Admin approval queue & bulk CSV import. | ✅ Verified |
+| **Duplicate Booking Guard** | Prevents duplicate titles and room/slot collisions with HTTP 409 and UI debouncing. | ✅ Verified |
+| **Automated Tests** | 8 Pytest unit tests verifying routes, RBAC, export, approvals, and user management (`pytest backend/tests/test_api.py`). | ✅ 100% Passed |
 | **CI / CD Pipeline** | GitHub Actions workflow (`.github/workflows/ci.yml`) runs lint, tests, and Vite build on push/PR. | ✅ Configured |
 
 ---
