@@ -57,6 +57,15 @@ ROLE_PERMISSIONS: dict[RoleEnum, Set[PermissionEnum]] = {
         PermissionEnum.DISRUPTION_VIEW,
         PermissionEnum.DISRUPTION_TRIGGER,
     },
+    RoleEnum.DEPARTMENT_COORDINATOR: {
+        PermissionEnum.SCHEDULE_VIEW,
+        PermissionEnum.SCHEDULE_EDIT,
+        PermissionEnum.EXAM_VIEW,
+        PermissionEnum.BOOKING_VIEW,
+        PermissionEnum.BOOKING_REQUEST,
+        PermissionEnum.DISRUPTION_VIEW,
+        PermissionEnum.DISRUPTION_TRIGGER,
+    },
     RoleEnum.CLUB_LEAD: {
         PermissionEnum.SCHEDULE_VIEW,
         PermissionEnum.BOOKING_VIEW,

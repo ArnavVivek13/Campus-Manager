@@ -27,11 +27,12 @@ from backend.app.solver.timetable_solver import TimetableSolver
 from backend.app.solver.exam_solver import ExamSolver
 from backend.app.solver.booking_solver import BookingSolver
 
-from backend.app.db.session import get_db
+from backend.app.db.session import get_db, SessionLocal
 from backend.app.db.models import (
-    User, Room, Faculty, StudentGroup, SessionModel, ExamModel, BookingModel, DisruptionLog, RoleEnum
+    User, Room, Faculty, StudentGroup, Course, SessionModel, ExamModel, BookingModel, DisruptionLog, RoleEnum, DatasetState, ScheduleVersion
 )
 from backend.app.db.seed import init_db, seed_baseline_records, clear_db_data
+from backend.app.db.persistence import sync_dataset_to_db, sync_schedule_to_db, load_schedule_from_db
 from backend.app.auth.rbac import get_current_user, require_role, require_permission, PermissionEnum
 from backend.app.api.auth_routes import router as auth_router
 from backend.app.api.user_routes import router as user_router
@@ -103,17 +104,33 @@ def set_empty_state():
 
 
 def load_initial_state():
-    with open(DATA_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    db = SessionLocal()
+    try:
+        # Check if active dataset and schedule exist in SQL DB
+        active_ds = db.query(DatasetState).filter(DatasetState.is_active == True).first()
+        if not active_ds and os.path.exists(DATA_PATH):
+            seed_baseline_records(db)
+            active_ds = db.query(DatasetState).filter(DatasetState.is_active == True).first()
 
-    source_path = SCHEDULE_BASELINE_PATH if os.path.exists(SCHEDULE_BASELINE_PATH) else SCHEDULE_PATH
-    with open(source_path, "r", encoding="utf-8") as f:
-        sched = json.load(f)
-
-    STATE["data"] = copy.deepcopy(data)
-    STATE["baseline_data"] = copy.deepcopy(data)
-    STATE["schedule"] = copy.deepcopy(sched)
-    STATE["baseline_schedule"] = copy.deepcopy(sched)
+        if active_ds and active_ds.raw_dataset_json:
+            data = json.loads(active_ds.raw_dataset_json)
+            sched = load_schedule_from_db(db, version_tag="baseline")
+            STATE["data"] = copy.deepcopy(data)
+            STATE["baseline_data"] = copy.deepcopy(data)
+            STATE["schedule"] = copy.deepcopy(sched)
+            STATE["baseline_schedule"] = copy.deepcopy(sched)
+        else:
+            with open(DATA_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            source_path = SCHEDULE_BASELINE_PATH if os.path.exists(SCHEDULE_BASELINE_PATH) else SCHEDULE_PATH
+            with open(source_path, "r", encoding="utf-8") as f:
+                sched = json.load(f)
+            STATE["data"] = copy.deepcopy(data)
+            STATE["baseline_data"] = copy.deepcopy(data)
+            STATE["schedule"] = copy.deepcopy(sched)
+            STATE["baseline_schedule"] = copy.deepcopy(sched)
+    finally:
+        db.close()
 
     try:
         with open(SCHEDULE_PATH, "w", encoding="utf-8") as f:
@@ -678,10 +695,10 @@ def export_schedule_endpoint():
 
 
 @app.post("/api/admin/load-dataset")
-async def load_dataset_endpoint(file: UploadFile = File(None)):
+async def load_dataset_endpoint(file: UploadFile = File(None), db: Session = Depends(get_db)):
     """
     Allows Admin to upload a new dataset JSON file conforming to starter pack schema.
-    Validates, re-solves clash-free timetable, exams, and bookings, and updates live state.
+    Validates, re-solves clash-free timetable, exams, and bookings, and updates live state and SQL DBMS.
     """
     if not file:
         raise HTTPException(status_code=400, detail="No dataset file provided.")
@@ -729,7 +746,11 @@ async def load_dataset_endpoint(file: UploadFile = File(None)):
             "exams": exams
         }
 
-        # Update in-memory state
+        # 1. Atomically sync full dataset entities and solved schedule into SQL DBMS
+        sync_dataset_to_db(db, new_data, set_as_active=True)
+        sync_schedule_to_db(db, new_schedule, version_tag="baseline", set_as_active=True)
+
+        # 2. Update in-memory state
         STATE["data"] = copy.deepcopy(new_data)
         STATE["baseline_data"] = copy.deepcopy(new_data)
         STATE["schedule"] = copy.deepcopy(new_schedule)

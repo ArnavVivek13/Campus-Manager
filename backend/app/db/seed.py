@@ -1,29 +1,74 @@
+import json
+import os
 from sqlalchemy.orm import Session
 from backend.app.db.session import engine, SessionLocal, Base
-from backend.app.db.models import User, RoleEnum, Room, Faculty, StudentGroup, SessionModel, ExamModel, BookingModel, DisruptionLog
+from backend.app.db.models import (
+    User, RoleEnum, Room, Faculty, StudentGroup, Course, SessionModel, ExamModel, BookingModel, DisruptionLog, DatasetState, ScheduleVersion
+)
 from backend.app.auth.security import hash_password
+from backend.app.db.persistence import sync_dataset_to_db, sync_schedule_to_db
+
+DATA_PATH = os.path.join("CrunchWeek_StarterPack", "data", "cit_public.json")
+BASELINE_SCHEDULE_PATH = os.path.join("exports", "schedule.baseline.json")
 
 def init_db():
     """
-    Initializes tables.
-    Keeps schedule and operational data empty by default.
-    Only seeds the default administrator account if no users exist.
+    Initializes tables and provisions necessary administrative and core roles.
+    Keeps schedule operational data clean.
     """
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        # Seed default Admin account if fresh
+        # Seed default administrative and demonstration roles if users table is empty
         if db.query(User).count() == 0:
-            admin_user = User(
-                email="admin@cit.edu",
-                hashed_password=hash_password("Admin@123"),
-                full_name="CIT Academic Operations / Dean",
-                role=RoleEnum.ADMIN,
-                department="Academic Affairs",
-                is_active=True,
-                oauth_provider="local"
-            )
-            db.add(admin_user)
+            users_to_seed = [
+                User(
+                    email="admin@cit.edu",
+                    hashed_password=hash_password("Admin@123"),
+                    full_name="CIT Academic Operations / Dean",
+                    role=RoleEnum.ADMIN,
+                    department="Academic Affairs",
+                    is_active=True,
+                    oauth_provider="local"
+                ),
+                User(
+                    email="coordinator@cit.edu",
+                    hashed_password=hash_password("Coord@123"),
+                    full_name="Department Academic Coordinator",
+                    role=RoleEnum.DEPARTMENT_COORDINATOR,
+                    department="CSE",
+                    is_active=True,
+                    oauth_provider="local"
+                ),
+                User(
+                    email="faculty@cit.edu",
+                    hashed_password=hash_password("Faculty@123"),
+                    full_name="Dr. Ananya Mishra",
+                    role=RoleEnum.FACULTY,
+                    department="CSE",
+                    is_active=True,
+                    oauth_provider="local"
+                ),
+                User(
+                    email="club@cit.edu",
+                    hashed_password=hash_password("Club@123"),
+                    full_name="Spectra Core Festival Lead",
+                    role=RoleEnum.CLUB_LEAD,
+                    department="Student Council",
+                    is_active=True,
+                    oauth_provider="local"
+                ),
+                User(
+                    email="student@cit.edu",
+                    hashed_password=hash_password("Student@123"),
+                    full_name="B.Tech Student Cohort Rep",
+                    role=RoleEnum.STUDENT,
+                    department="CSE",
+                    is_active=True,
+                    oauth_provider="local"
+                ),
+            ]
+            db.add_all(users_to_seed)
             db.commit()
     finally:
         db.close()
@@ -31,83 +76,18 @@ def init_db():
 
 def seed_baseline_records(db: Session):
     """
-    Populates baseline rooms, faculty, groups, sessions, exams, and bookings
-    when requested by an Administrator via 'Restore Baseline'.
+    Populates full starter pack dataset (27 rooms, 40 faculty, 14 student groups, 62 courses,
+    189 sessions, 41 exams, 25 fest bookings) directly into SQL DBMS.
     """
-    # 1. Rooms
-    if db.query(Room).count() == 0:
-        rooms_data = [
-            Room(id="LH-1", name="Lecture Hall 1", capacity=120, room_type="Lecture Hall", equipment="Projector, PA System"),
-            Room(id="LH-2", name="Lecture Hall 2", capacity=90, room_type="Lecture Hall", equipment="Projector, PA System"),
-            Room(id="LH-3", name="Lecture Hall 3", capacity=90, room_type="Lecture Hall", equipment="Projector, Audio"),
-            Room(id="LAB-1", name="Computing Systems Lab", capacity=60, room_type="Lab", equipment="Workstations, Linux GPU"),
-            Room(id="LAB-2", name="Software Engineering Lab", capacity=60, room_type="Lab", equipment="Workstations"),
-            Room(id="LAB-3", name="Hardware & IoT Lab", capacity=50, room_type="Lab", equipment="FPGA Kits, Oscilloscopes"),
-            Room(id="AUD", name="Pushpagiri Main Auditorium", capacity=420, room_type="Auditorium", equipment="Stage, High-Lumen Projector, Line-Array Sound"),
-            Room(id="AMPH", name="Campus Open Amphitheatre", capacity=500, room_type="Amphitheatre", equipment="Open-Air Acoustics"),
-            Room(id="SEM-HALL", name="Central Seminar Hall", capacity=120, room_type="Seminar Hall", equipment="Dual Screen, Conference Mic"),
-        ]
-        db.add_all(rooms_data)
+    if os.path.exists(DATA_PATH):
+        with open(DATA_PATH, "r", encoding="utf-8") as f:
+            dataset = json.load(f)
+        sync_dataset_to_db(db, dataset, set_as_active=True)
 
-    # 2. Faculty
-    if db.query(Faculty).count() == 0:
-        faculty_data = [
-            Faculty(id="F01", name="Dr. Arvind Rao", department="CSE", max_daily_hours=4),
-            Faculty(id="F02", name="Dr. Sunita Sen", department="CSE", max_daily_hours=4),
-            Faculty(id="F03", name="Prof. Rajesh K.", department="CSE", max_daily_hours=4),
-            Faculty(id="F07", name="Dr. Meera Patel", department="Mathematics", max_daily_hours=4),
-            Faculty(id="F08", name="Prof. David Nair", department="Humanities", max_daily_hours=4),
-        ]
-        db.add_all(faculty_data)
-
-    # 3. Student Groups
-    if db.query(StudentGroup).count() == 0:
-        groups_data = [
-            StudentGroup(id="CSE-2", name="B.Tech Computer Science Year 2", strength=60, department="CSE", year=2),
-            StudentGroup(id="CSE-3", name="B.Tech Computer Science Year 3", strength=55, department="CSE", year=3),
-            StudentGroup(id="ECE-2", name="B.Tech Electronics Year 2", strength=58, department="ECE", year=2),
-        ]
-        db.add_all(groups_data)
-
-    # 4. Sessions
-    if db.query(SessionModel).count() == 0:
-        sessions_data = [
-            SessionModel(id="SES-01", course_code="CS201", course_name="Data Structures", group_id="CSE-2", faculty_id="F01", room_id="LH-1", day=0, start_hour=9.0, end_hour=10.5, category="Core", status="Confirmed"),
-            SessionModel(id="SES-02", course_code="MA201", course_name="Discrete Mathematics", group_id="CSE-2", faculty_id="F07", room_id="LH-1", day=0, start_hour=11.0, end_hour=12.5, category="Math", status="Confirmed"),
-            SessionModel(id="SES-03", course_code="HS201", course_name="Technical Writing", group_id="CSE-2", faculty_id="F08", room_id="LH-2", day=0, start_hour=14.0, end_hour=15.5, category="Humanities", status="Confirmed"),
-            SessionModel(id="SES-04", course_code="CS204", course_name="Data Structures Lab", group_id="CSE-2", faculty_id="F02", room_id="LAB-1", day=0, start_hour=12.0, end_hour=15.0, category="Lab", status="Confirmed"),
-            SessionModel(id="SES-05", course_code="CS207", course_name="AI Fundamentals", group_id="CSE-2", faculty_id="F03", room_id="LH-1", day=1, start_hour=9.0, end_hour=10.5, category="Core", status="Confirmed"),
-            SessionModel(id="SES-06", course_code="ME201", course_name="Manufacturing Lab", group_id="CSE-2", faculty_id="F03", room_id="LAB-1", day=1, start_hour=9.0, end_hour=12.0, category="Lab", status="Confirmed"),
-            SessionModel(id="SES-07", course_code="CS205", course_name="Operating Systems", group_id="CSE-2", faculty_id="F02", room_id="LH-1", day=2, start_hour=9.0, end_hour=10.5, category="Core", status="Confirmed"),
-            SessionModel(id="SES-08", course_code="CS208", course_name="OS Systems Lab", group_id="CSE-2", faculty_id="F02", room_id="LAB-2", day=2, start_hour=14.0, end_hour=17.0, category="Lab", status="Confirmed"),
-            SessionModel(id="SES-09", course_code="CS203", course_name="Computer Networks", group_id="CSE-2", faculty_id="F01", room_id="LH-1", day=3, start_hour=9.0, end_hour=10.5, category="Core", status="Confirmed"),
-            SessionModel(id="SES-10", course_code="PE101", course_name="Professional Ethics", group_id="CSE-2", faculty_id="F08", room_id="LH-2", day=4, start_hour=16.0, end_hour=17.0, category="Humanities", status="Confirmed"),
-        ]
-        db.add_all(sessions_data)
-
-    # 5. Exams
-    if db.query(ExamModel).count() == 0:
-        exams_data = [
-            ExamModel(course_code="CS201", course_name="Data Structures", day="MON", slot="AM", groups="CSE-2, CSE-3", rooms="LH-1 · LH-2", status="Confirmed"),
-            ExamModel(course_code="MA202", course_name="Discrete Mathematics", day="MON", slot="PM", groups="CSE-2, ECE-2", rooms="LH-1 · LH-2", status="Confirmed"),
-            ExamModel(course_code="CS203", course_name="Computer Networks", day="TUE", slot="AM", groups="CSE-2", rooms="LH-1", status="Confirmed"),
-            ExamModel(course_code="CS205", course_name="Operating Systems", day="WED", slot="PM", groups="CSE-2, CSE-3", rooms="LH-1 · LH-2", status="Confirmed"),
-            ExamModel(course_code="HS201", course_name="Technical Writing", day="THU", slot="AM", groups="All Year 2", rooms="LH-1 · LH-2 · LH-3", status="Confirmed"),
-            ExamModel(course_code="CS204", course_name="Data Structures Lab", day="SAT", slot="PM", groups="CSE-2", rooms="LAB-1 · LAB-2", status="Confirmed"),
-        ]
-        db.add_all(exams_data)
-
-    # 6. Bookings
-    if db.query(BookingModel).count() == 0:
-        bookings_data = [
-            BookingModel(id="SP-027", event_name="Design Conclave", club_name="Design & Arts Guild", requested_slot="Wed, 16:00–20:00", assigned_venue="AUD · Wed, 16:00–20:00", status="Approved", score=4.5, priority=1),
-            BookingModel(id="SP-031", event_name="Battle of Bands", club_name="CIT Music Society", requested_slot="Fri, 17:00–21:00", assigned_venue="AMPH · Fri, 18:00–22:00", status="Alternative Offered", score=3.8, priority=2),
-            BookingModel(id="SP-034", event_name="Founder Fireside", club_name="E-Cell", requested_slot="Thu, 15:00–17:00", assigned_venue="LH-1 · Thu, 15:00–17:00", status="Approved", score=4.2, priority=1),
-            BookingModel(id="SP-041", event_name="Robotics Showcase", club_name="Mech & Robotics Club", requested_slot="Sat, 09:00–14:00", assigned_venue="—", status="Rejected", score=1.5, priority=3),
-        ]
-        db.add_all(bookings_data)
-
-    db.commit()
+    if os.path.exists(BASELINE_SCHEDULE_PATH):
+        with open(BASELINE_SCHEDULE_PATH, "r", encoding="utf-8") as f:
+            baseline_sched = json.load(f)
+        sync_schedule_to_db(db, baseline_sched, version_tag="baseline", set_as_active=True)
 
 
 def clear_db_data(db: Session):
@@ -115,8 +95,11 @@ def clear_db_data(db: Session):
     try:
         db.query(BookingModel).delete()
         db.query(DisruptionLog).delete()
+        db.query(ScheduleVersion).delete()
+        db.query(DatasetState).delete()
         db.query(SessionModel).delete()
         db.query(ExamModel).delete()
+        db.query(Course).delete()
         db.query(Room).delete()
         db.query(Faculty).delete()
         db.query(StudentGroup).delete()

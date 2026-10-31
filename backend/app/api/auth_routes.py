@@ -174,6 +174,7 @@ def demo_role_login(req: DemoLoginRequest, db: Session = Depends(get_db)):
     role_email_map = {
         RoleEnum.ADMIN: "admin@cit.edu",
         RoleEnum.FACULTY: "faculty@cit.edu",
+        RoleEnum.DEPARTMENT_COORDINATOR: "coordinator@cit.edu",
         RoleEnum.CLUB_LEAD: "club@cit.edu",
         RoleEnum.STUDENT: "student@cit.edu",
     }
