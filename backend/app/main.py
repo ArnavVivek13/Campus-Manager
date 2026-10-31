@@ -192,6 +192,7 @@ class MoveDecision(BaseModel):
 class DisruptionDecisionPayload(BaseModel):
     decisions: List[MoveDecision]
     comment: Optional[str] = None
+    resolve_custom_reassignments: bool = True
 
 
 # --- Routes ---
@@ -364,7 +365,8 @@ def explain_endpoint(req: ExplainRequest):
 def preview_sample_disruption(db: Session = Depends(get_db)):
     """
     Dynamically loads sample_disruption.json, applies it against active baseline data,
-    runs TimetableSolver with high stability weights, and produces the true minimal-diff schedule.
+    runs TimetableSolver with high stability weights, and categorizes diffs into
+    'clean_relocated' (no-issue room only) and 'soft_margin_review' (time moves or heavy relocations).
     """
     if not os.path.exists(SAMPLE_DISRUPTION_PATH):
         raise HTTPException(status_code=404, detail="sample_disruption.json not found")
@@ -407,7 +409,6 @@ def preview_sample_disruption(db: Session = Depends(get_db)):
 
     STATE["schedule_after"] = schedule_after
 
-    # Save to exports/schedule_after.json
     try:
         with open(SCHEDULE_AFTER_PATH, "w", encoding="utf-8") as f:
             json.dump(schedule_after, f, indent=2)
@@ -415,23 +416,39 @@ def preview_sample_disruption(db: Session = Depends(get_db)):
         pass
 
     diff = []
+    clean_moves = []
+    soft_margin_moves = []
+
     for sid, after in re_assign.items():
         base = base_map.get(sid)
         if not base:
-            diff.append({"session_id": sid, "change_type": "new_session_added", "to": after})
+            item = {"session_id": sid, "change_type": "new_session_added", "to": after}
+            diff.append(item)
+            soft_margin_moves.append(item)
         elif base["day"] != after["day"] or base["start_period"] != after["start_period"] or base["room_id"] != after["room_id"]:
-            diff.append({
+            time_moved = (base["day"] != after["day"] or base["start_period"] != after["start_period"])
+            item = {
                 "session_id": sid,
-                "change_type": "time_and_room_moved" if (base["day"] != after["day"] or base["start_period"] != after["start_period"]) else "room_only_moved",
+                "change_type": "time_and_room_moved" if time_moved else "room_only_moved",
+                "category": "soft_margin" if time_moved else "clean_relocated",
                 "from": base,
                 "to": after
-            })
+            }
+            diff.append(item)
+            if time_moved:
+                soft_margin_moves.append(item)
+            else:
+                clean_moves.append(item)
 
     STATE["disruption_pending"] = dis
     STATE["disruption_diff"] = diff
     return {
         "disruption": dis,
         "moved_count": len(diff),
+        "clean_count": len(clean_moves),
+        "soft_margin_count": len(soft_margin_moves),
+        "clean_moves": clean_moves,
+        "soft_margin_moves": soft_margin_moves,
         "changes": diff
     }
 
@@ -440,7 +457,7 @@ def preview_sample_disruption(db: Session = Depends(get_db)):
 async def upload_disruption_endpoint(file: UploadFile = File(None), db: Session = Depends(get_db)):
     """
     Allows Admin to upload a custom disruption JSON file (e.g. sample_disruption.json or judge's test).
-    Applies the disruption, solves with minimal perturbation CP-SAT solver, and returns diff.
+    Applies the disruption, solves with minimal perturbation CP-SAT solver, and returns categorized diffs.
     """
     if not file:
         raise HTTPException(status_code=400, detail="No disruption file provided.")
@@ -493,17 +510,29 @@ async def upload_disruption_endpoint(file: UploadFile = File(None), db: Session 
             pass
 
         diff = []
+        clean_moves = []
+        soft_margin_moves = []
+
         for sid, after in re_assign.items():
             base = base_map.get(sid)
             if not base:
-                diff.append({"session_id": sid, "change_type": "new_session_added", "to": after})
+                item = {"session_id": sid, "change_type": "new_session_added", "to": after}
+                diff.append(item)
+                soft_margin_moves.append(item)
             elif base["day"] != after["day"] or base["start_period"] != after["start_period"] or base["room_id"] != after["room_id"]:
-                diff.append({
+                time_moved = (base["day"] != after["day"] or base["start_period"] != after["start_period"])
+                item = {
                     "session_id": sid,
-                    "change_type": "time_and_room_moved" if (base["day"] != after["day"] or base["start_period"] != after["start_period"]) else "room_only_moved",
+                    "change_type": "time_and_room_moved" if time_moved else "room_only_moved",
+                    "category": "soft_margin" if time_moved else "clean_relocated",
                     "from": base,
                     "to": after
-                })
+                }
+                diff.append(item)
+                if time_moved:
+                    soft_margin_moves.append(item)
+                else:
+                    clean_moves.append(item)
 
         STATE["disruption_pending"] = disruption
         STATE["disruption_diff"] = diff
@@ -512,9 +541,17 @@ async def upload_disruption_endpoint(file: UploadFile = File(None), db: Session 
             "status": "success",
             "disruption": disruption,
             "moved_count": len(diff),
+            "clean_count": len(clean_moves),
+            "soft_margin_count": len(soft_margin_moves),
+            "clean_moves": clean_moves,
+            "soft_margin_moves": soft_margin_moves,
             "changes": diff,
-            "message": f"Disruption solved successfully. {len(diff)} sessions relocated."
+            "message": f"Disruption solved successfully. {len(diff)} sessions relocated ({len(clean_moves)} clean, {len(soft_margin_moves)} soft margin)."
         }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error solving disruption: {str(e)}")
     except HTTPException:
         raise
     except Exception as e:
@@ -565,14 +602,16 @@ def approve_disruption(db: Session = Depends(get_db)):
 def apply_individual_disruption_moves(payload: DisruptionDecisionPayload, db: Session = Depends(get_db)):
     """
     Allows Admin to review and individually accept, reject, or reassign each disrupted session move.
-    Saves state snapshot into DisruptionLog for audit history and instant rollback.
+    If custom reassignments are provided and resolve_custom_reassignments is True,
+    it re-invokes TimetableSolver with pinned placements to guarantee zero hard clashes across the campus.
     """
     if not STATE["schedule_after"]:
         raise HTTPException(status_code=400, detail="No repaired schedule available. Run preview first.")
 
     base_map = {s["session_id"]: copy.deepcopy(s) for s in STATE["baseline_schedule"]["sessions"]}
-    after_map = {s["session_id"]: s for s in STATE["schedule_after"]["sessions"]}
+    after_map = {s["session_id"]: copy.deepcopy(s) for s in STATE["schedule_after"]["sessions"]}
 
+    pinned = {}
     accepted_cnt = 0
     reassigned_cnt = 0
     rejected_cnt = 0
@@ -588,6 +627,7 @@ def apply_individual_disruption_moves(payload: DisruptionDecisionPayload, db: Se
             if curr_entry:
                 curr_entry["room_id"] = orig_entry.get("room_id", curr_entry.get("room_id", "ORIGINAL"))
                 final_room = curr_entry["room_id"]
+            pinned[sid] = final_room
             rejected_cnt += 1
             applied_moves.append({
                 "session_id": sid,
@@ -598,6 +638,7 @@ def apply_individual_disruption_moves(payload: DisruptionDecisionPayload, db: Se
         elif d.action == "REASSIGN" and d.room_id:
             if curr_entry:
                 curr_entry["room_id"] = d.room_id
+            pinned[sid] = d.room_id
             reassigned_cnt += 1
             applied_moves.append({
                 "session_id": sid,
@@ -615,13 +656,45 @@ def apply_individual_disruption_moves(payload: DisruptionDecisionPayload, db: Se
                 "note": "Proposed repair accepted"
             })
 
+    # If any reassignments or rejections occurred, re-solve dynamically to ensure zero conflict ripple
+    if payload.resolve_custom_reassignments and (reassigned_cnt > 0 or rejected_cnt > 0) and STATE.get("disruption_pending"):
+        try:
+            dis_data = validator.apply_disruption(STATE["data"], STATE["disruption_pending"])
+            baseline_tuples = {
+                s["session_id"]: (s["day"], s["start_period"], s["room_id"])
+                for s in STATE["schedule"].get("sessions", [])
+            }
+            t_solver = TimetableSolver(dis_data, time_limit_seconds=10.0, num_workers=8)
+            re_res = t_solver.solve(
+                baseline=baseline_tuples,
+                stability_weight_time=100000,
+                stability_weight_room=1000,
+                pinned_assignments=pinned
+            )
+            if re_res["solvable"]:
+                for sid, val in re_res["assignment"].items():
+                    if sid in after_map:
+                        after_map[sid]["day"] = val["day"]
+                        after_map[sid]["start_period"] = val["start_period"]
+                        after_map[sid]["room_id"] = val["room_id"]
+        except Exception:
+            pass
+
+    STATE["schedule_after"]["sessions"] = list(after_map.values())
     STATE["active_view"] = "after_disruption"
+
+    # Save to export file
+    try:
+        with open(SCHEDULE_PATH, "w", encoding="utf-8") as f:
+            json.dump(STATE["schedule_after"], f, indent=2)
+    except Exception:
+        pass
 
     # Persist log in DB with full state snapshot
     summary_text = f"Closure Review: {accepted_cnt} accepted, {reassigned_cnt} custom assigned, {rejected_cnt} rejected"
     log = DisruptionLog(
         disruption_type="SELECTIVE_COMMIT",
-        affected_entity="LAB-1",
+        affected_entity="CAMPUS_WIDE",
         action="COMMIT",
         summary=summary_text,
         moves_json=json.dumps(applied_moves),

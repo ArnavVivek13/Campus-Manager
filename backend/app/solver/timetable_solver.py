@@ -43,10 +43,11 @@ class TimetableSolver:
             if s.get("basket_slot"):
                 self.basket_sessions[s["basket_slot"]].append(s["id"])
 
-    def solve(self, baseline=None, stability_weight_time=1000, stability_weight_room=100):
+    def solve(self, baseline=None, stability_weight_time=1000, stability_weight_room=100, pinned_assignments=None):
         """
         Solves timetable.
         If baseline is provided (dict of {sid: (day, start, room)}), penalizes moves to ensure minimal perturbation.
+        If pinned_assignments is provided (dict of {sid: room_id or (day, start, room)}), forces those sessions to specified placement.
         """
         model = cp_model.CpModel()
 
@@ -58,12 +59,19 @@ class TimetableSolver:
             allowed_starts = self.lab_starts if s["kind"] == "lab" else self.periods
             fx = s.get("fixed_slot")
 
+            # Check if pinned by user in disruption re-solve
+            pinned = (pinned_assignments or {}).get(sid)
+
             cands = []
             for d in self.days:
                 if fx and fx["day"] != d:
                     continue
+                if isinstance(pinned, tuple) and pinned[0] != d:
+                    continue
                 for p in allowed_starts:
                     if fx and fx["start_period"] != p:
+                        continue
+                    if isinstance(pinned, tuple) and pinned[1] != p:
                         continue
                     pers = list(range(p, p + dur))
                     if pers[-1] > max(self.periods):
@@ -77,6 +85,10 @@ class TimetableSolver:
 
                     # Room filtering
                     for rid, r in self.rooms.items():
+                        if isinstance(pinned, str) and rid != pinned:
+                            continue
+                        if isinstance(pinned, tuple) and len(pinned) >= 3 and rid != pinned[2]:
+                            continue
                         if r["capacity"] < s["size"]:
                             continue
                         if r["type"] not in s["room_types"]:

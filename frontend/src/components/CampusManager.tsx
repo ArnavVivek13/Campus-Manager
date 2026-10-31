@@ -1598,6 +1598,8 @@ function Disruption({
 }) {
   const [activeSubTab, setActiveSubTab] = useState<'simulation' | 'history'>('simulation')
   const [busy, setBusy] = useState(false)
+  const [cleanOpen, setCleanOpen] = useState(true)
+  const [softMarginOpen, setSoftMarginOpen] = useState(true)
 
   const wrappedApplyMoves = async () => {
     setBusy(true)
@@ -1630,6 +1632,26 @@ function Disruption({
     return match ? (match[1] || match[2]) : 'LAB-2'
   }
 
+  // Separate moves into clean (room-only) vs soft margin (time moves or new sessions)
+  const { cleanMoves, softMarginMoves } = useMemo(() => {
+    const clean: string[][] = []
+    const soft: string[][] = []
+    moves.forEach(m => {
+      const orig = m[2] ?? ''
+      const dest = m[3] ?? ''
+      const isNew = orig.includes('New session')
+      // Detect if day or period changed
+      const origTime = orig.split('·')[0]?.trim() || ''
+      const destTime = dest.split('·')[0]?.trim() || ''
+      if (isNew || (origTime && destTime && origTime !== destTime)) {
+        soft.push(m)
+      } else {
+        clean.push(m)
+      }
+    })
+    return { cleanMoves: clean, softMarginMoves: soft }
+  }, [moves])
+
   // Count decisions
   const stats = useMemo(() => {
     let accepted = 0
@@ -1644,6 +1666,127 @@ function Disruption({
     })
     return { accepted, reassigned, rejected }
   }, [moves, decisions])
+
+  const renderMoveCard = (m: string[], isSoftMargin: boolean) => {
+    const sid = m[0] ?? ''
+    const proposedRoom = getProposedRoom(m)
+    const dec = (sid && decisions[sid]) ? decisions[sid] : { action: 'ACCEPT' as const, room_id: proposedRoom }
+    const currentRoom = dec.room_id || proposedRoom
+
+    return (
+      <div
+        key={sid}
+        className={`flex flex-col justify-between rounded-none border border-timetable-grid p-4 transition ${
+          dec.action === 'ACCEPT'
+            ? isSoftMargin ? `${hue.peach} ring-1 ring-amber-500/30` : `${hue.sky} ring-1 ring-emerald-500/30`
+            : dec.action === 'REASSIGN'
+            ? `${hue.violet} ring-1 ring-sky-500/30`
+            : 'bg-muted/70 opacity-80 ring-1 ring-rose-500/30'
+        }`}
+      >
+        <div>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <span className="text-[10px] font-mono tracking-wide uppercase opacity-70">
+                {sid}
+              </span>
+              <p className="text-sm font-medium">{m[1]}</p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {isSoftMargin && (
+                <span className="rounded px-1.5 py-0.5 text-[9px] font-semibold bg-amber-500/20 text-amber-700 dark:text-amber-300">
+                  Time / Ripple
+                </span>
+              )}
+              <span
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                  dec.action === 'ACCEPT'
+                    ? 'bg-emerald-600 text-white'
+                    : dec.action === 'REASSIGN'
+                    ? 'bg-sky-600 text-white'
+                    : 'bg-rose-600 text-white'
+                }`}
+              >
+                {dec.action}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-3 text-xs">
+            <p className="line-through opacity-60">{m[2]}</p>
+            <p className="mt-1 font-medium">{m[3]}</p>
+          </div>
+        </div>
+
+        <div className="mt-4 pt-3 border-t border-timetable-grid/60">
+          <p className="text-[11px] font-medium opacity-80 mb-2">Review Action:</p>
+          <div className="grid grid-cols-3 gap-1.5">
+            <button
+              type="button"
+              onClick={() => sid && onDecisionChange(sid, 'ACCEPT', proposedRoom)}
+              className={`flex items-center justify-center gap-1 rounded py-1.5 text-xs transition ${
+                dec.action === 'ACCEPT'
+                  ? 'bg-emerald-600 text-white font-medium shadow-sm'
+                  : 'bg-card/70 border border-timetable-grid text-foreground/80 hover:bg-card'
+              }`}
+            >
+              <CheckCircle2 className="size-3" />
+              Accept
+            </button>
+            <button
+              type="button"
+              onClick={() => sid && onDecisionChange(sid, 'REASSIGN', currentRoom)}
+              className={`flex items-center justify-center gap-1 rounded py-1.5 text-xs transition ${
+                dec.action === 'REASSIGN'
+                  ? 'bg-sky-600 text-white font-medium shadow-sm'
+                  : 'bg-card/70 border border-timetable-grid text-foreground/80 hover:bg-card'
+              }`}
+            >
+              <ArrowRight className="size-3" />
+              Reassign
+            </button>
+            <button
+              type="button"
+              onClick={() => sid && onDecisionChange(sid, 'REJECT')}
+              className={`flex items-center justify-center gap-1 rounded py-1.5 text-xs transition ${
+                dec.action === 'REJECT'
+                  ? 'bg-rose-600 text-white font-medium shadow-sm'
+                  : 'bg-card/70 border border-timetable-grid text-foreground/80 hover:bg-card'
+              }`}
+            >
+              <XCircle className="size-3" />
+              Reject
+            </button>
+          </div>
+
+          {dec.action === 'REASSIGN' && (
+            <div className="mt-3 rounded bg-card/90 p-2 border border-timetable-grid">
+              <label className="block text-[11px] font-medium text-foreground/80 mb-1">
+                Custom Target Venue:
+              </label>
+              <select
+                value={currentRoom}
+                onChange={(e) => sid && onDecisionChange(sid, 'REASSIGN', e.target.value)}
+                className="w-full rounded border border-timetable-grid bg-background px-2 py-1 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ink"
+              >
+                {availableRooms.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="mt-2 text-[11px] opacity-75">
+            {dec.action === 'ACCEPT' && `Moving to suggested: ${proposedRoom}`}
+            {dec.action === 'REASSIGN' && `Re-allocates to: ${currentRoom} (Re-solves schedule)`}
+            {dec.action === 'REJECT' && `Keeps baseline assignment`}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -1703,15 +1846,15 @@ function Disruption({
             <>
               {/* Summary counters */}
               <div className="mt-5 flex flex-wrap items-center gap-2 text-xs">
-                <span className="rounded-full bg-secondary px-3 py-1.5 font-medium">{moves.length} sessions moved</span>
+                <span className="rounded-full bg-secondary px-3 py-1.5 font-medium">{moves.length} total moves</span>
                 <span className="rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-3 py-1.5 font-medium">
-                  {stats.accepted} accepted
+                  {cleanMoves.length} no-issue room relocations
+                </span>
+                <span className="rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20 px-3 py-1.5 font-medium">
+                  {softMarginMoves.length} soft margin / review items
                 </span>
                 <span className="rounded-full bg-sky-500/10 text-sky-600 border border-sky-500/20 px-3 py-1.5 font-medium">
-                  {stats.reassigned} reassigned
-                </span>
-                <span className="rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/20 px-3 py-1.5 font-medium">
-                  {stats.rejected} rejected
+                  {stats.reassigned} custom reassignments
                 </span>
                 {isCommitted && (
                   <span className="rounded-full bg-success/20 px-3 py-1.5 text-success font-medium">
@@ -1720,133 +1863,62 @@ function Disruption({
                 )}
               </div>
 
-              {/* Individual Move Cards */}
-              <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                {moves.map(m => {
-                  const sid = m[0] ?? ''
-                  const proposedRoom = getProposedRoom(m)
-                  const dec = (sid && decisions[sid]) ? decisions[sid] : { action: 'ACCEPT' as const, room_id: proposedRoom }
-                  const currentRoom = dec.room_id || proposedRoom
-
-                  return (
-                    <div
-                      key={sid}
-                      className={`flex flex-col justify-between rounded-none border border-timetable-grid p-4 transition ${
-                        dec.action === 'ACCEPT'
-                          ? `${hue.sky} ring-1 ring-emerald-500/30`
-                          : dec.action === 'REASSIGN'
-                          ? `${hue.violet} ring-1 ring-sky-500/30`
-                          : 'bg-muted/70 opacity-80 ring-1 ring-rose-500/30'
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <span className="text-[10px] font-mono tracking-wide uppercase opacity-70">
-                              {sid}
-                            </span>
-                            <p className="text-sm font-medium">{m[1]}</p>
-                          </div>
-                          <span
-                            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
-                              dec.action === 'ACCEPT'
-                                ? 'bg-emerald-600 text-white'
-                                : dec.action === 'REASSIGN'
-                                ? 'bg-sky-600 text-white'
-                                : 'bg-rose-600 text-white'
-                            }`}
-                          >
-                            {dec.action}
-                          </span>
-                        </div>
-
-                        {/* Strikethrough original and proposed */}
-                        <div className="mt-3 text-xs">
-                          <p className="line-through opacity-60">{m[2]}</p>
-                          <p className="mt-1 font-medium">{m[3]}</p>
-                        </div>
+              {/* 1. Expandable Dropdown: No Issue Relocated */}
+              <div className="mt-5 border border-timetable-grid bg-card">
+                <button
+                  type="button"
+                  onClick={() => setCleanOpen(o => !o)}
+                  className="w-full flex items-center justify-between p-4 text-left font-semibold text-sm bg-muted/40 hover:bg-muted/70 transition"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="size-2.5 rounded-full bg-emerald-500" />
+                    <span>1. No-Issue Room Relocations ({cleanMoves.length})</span>
+                    <span className="text-xs font-normal text-muted-foreground">
+                      — Seamless room shifts preserving original period & day
+                    </span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">{cleanOpen ? 'Collapse ▲' : 'Expand ▼'}</span>
+                </button>
+                {cleanOpen && (
+                  <div className="p-4 border-t border-timetable-grid">
+                    {cleanMoves.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No room-only relocations in this disruption.</p>
+                    ) : (
+                      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                        {cleanMoves.map(m => renderMoveCard(m, false))}
                       </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
-                      {/* Decision Controls */}
-                      <div className="mt-4 pt-3 border-t border-timetable-grid/60">
-                        <p className="text-[11px] font-medium opacity-80 mb-2">Individual Action:</p>
-                        <div className="grid grid-cols-3 gap-1.5">
-                          {/* Accept */}
-                          <button
-                            type="button"
-                            onClick={() => sid && onDecisionChange(sid, 'ACCEPT', proposedRoom)}
-                            className={`flex items-center justify-center gap-1 rounded py-1.5 text-xs transition ${
-                              dec.action === 'ACCEPT'
-                                ? 'bg-emerald-600 text-white font-medium shadow-sm'
-                                : 'bg-card/70 border border-timetable-grid text-foreground/80 hover:bg-card'
-                            }`}
-                            title="Accept recommended room"
-                          >
-                            <CheckCircle2 className="size-3" />
-                            Accept
-                          </button>
-
-                          {/* Reassign */}
-                          <button
-                            type="button"
-                            onClick={() => sid && onDecisionChange(sid, 'REASSIGN', currentRoom)}
-                            className={`flex items-center justify-center gap-1 rounded py-1.5 text-xs transition ${
-                              dec.action === 'REASSIGN'
-                                ? 'bg-sky-600 text-white font-medium shadow-sm'
-                                : 'bg-card/70 border border-timetable-grid text-foreground/80 hover:bg-card'
-                            }`}
-                            title="Reassign to custom room"
-                          >
-                            <ArrowRight className="size-3" />
-                            Reassign
-                          </button>
-
-                          {/* Reject */}
-                          <button
-                            type="button"
-                            onClick={() => sid && onDecisionChange(sid, 'REJECT')}
-                            className={`flex items-center justify-center gap-1 rounded py-1.5 text-xs transition ${
-                              dec.action === 'REJECT'
-                                ? 'bg-rose-600 text-white font-medium shadow-sm'
-                                : 'bg-card/70 border border-timetable-grid text-foreground/80 hover:bg-card'
-                            }`}
-                            title="Reject relocation (keep original room)"
-                          >
-                            <XCircle className="size-3" />
-                            Reject
-                          </button>
-                        </div>
-
-                        {/* If Reassign is chosen, show room picker */}
-                        {dec.action === 'REASSIGN' && (
-                          <div className="mt-3 rounded bg-card/90 p-2 border border-timetable-grid">
-                            <label className="block text-[11px] font-medium text-foreground/80 mb-1">
-                              Override Venue:
-                            </label>
-                            <select
-                              value={currentRoom}
-                              onChange={(e) => sid && onDecisionChange(sid, 'REASSIGN', e.target.value)}
-                              className="w-full rounded border border-timetable-grid bg-background px-2 py-1 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ink"
-                            >
-                              {availableRooms.map((r) => (
-                                <option key={r} value={r}>
-                                  {r}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-
-                        {/* Status message */}
-                        <div className="mt-2 text-[11px] opacity-75">
-                          {dec.action === 'ACCEPT' && `Moving to suggested: ${proposedRoom}`}
-                          {dec.action === 'REASSIGN' && `Overriding destination: ${currentRoom}`}
-                          {dec.action === 'REJECT' && `Keeps baseline assignment`}
-                        </div>
+              {/* 2. Expandable Dropdown: Soft Margin Relocations */}
+              <div className="mt-4 border border-timetable-grid bg-card">
+                <button
+                  type="button"
+                  onClick={() => setSoftMarginOpen(o => !o)}
+                  className="w-full flex items-center justify-between p-4 text-left font-semibold text-sm bg-amber-500/10 hover:bg-amber-500/15 transition border-l-4 border-amber-500"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="size-2.5 rounded-full bg-amber-500" />
+                    <span>2. Soft Margin Relocations ({softMarginMoves.length})</span>
+                    <span className="text-xs font-normal text-amber-700 dark:text-amber-300">
+                      — Time shifts or added sessions requiring coordinator review
+                    </span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">{softMarginOpen ? 'Collapse ▲' : 'Expand ▼'}</span>
+                </button>
+                {softMarginOpen && (
+                  <div className="p-4 border-t border-timetable-grid">
+                    {softMarginMoves.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No soft margin time shifts or added sessions.</p>
+                    ) : (
+                      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                        {softMarginMoves.map(m => renderMoveCard(m, true))}
                       </div>
-                    </div>
-                  )
-                })}
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Bottom Action Footer */}
@@ -1863,7 +1935,7 @@ function Disruption({
                       className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition disabled:opacity-50"
                     >
                       {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                      Update & Re-commit Decisions
+                      Re-solve with Custom Decisions
                     </button>
                     <button
                       onClick={wrappedRevert}
@@ -1878,7 +1950,7 @@ function Disruption({
                 <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-none border border-timetable-grid bg-warning-soft p-4">
                   <div className="flex items-start gap-2 text-[13px] text-warning">
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                    <span>Review decisions above. Commit reviewed moves individually or accept all proposed repairs.</span>
+                    <span>Review decisions above. Applying re-solves any custom room overrides dynamically to prevent clashes.</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -1887,12 +1959,12 @@ function Disruption({
                       className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition disabled:opacity-50"
                     >
                       {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                      Commit Reviewed Decisions
+                      Apply & Re-solve Selected Decisions
                     </button>
                     <button
                       onClick={wrappedApprove}
                       disabled={busy}
-                      className="rounded-full border border-timetable-grid bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition disabled:opacity-50"
+                      className="rounded-full bg-card border border-timetable-grid px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition disabled:opacity-50"
                     >
                       Accept All & Commit
                     </button>
