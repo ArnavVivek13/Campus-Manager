@@ -8,6 +8,10 @@ import json
 import os
 import sys
 from typing import Dict, Any, Optional, List
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
 from fastapi import FastAPI, HTTPException, Query, Depends, status, UploadFile, File, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -477,7 +481,54 @@ def revert_disruption(db: Session = Depends(get_db)):
     }
 
 
+@app.post("/api/admin/clear-data")
+def clear_all_data(db: Session = Depends(get_db)):
+    """
+    Clears all current data from all SQL database tables and in-memory schedule tables.
+    """
+    # 1. Clear database records
+    try:
+        db.query(BookingModel).delete()
+        db.query(DisruptionLog).delete()
+        db.query(SessionModel).delete()
+        db.query(ExamModel).delete()
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    # 2. Clear in-memory schedule tables
+    dataset_id = STATE.get("data", {}).get("dataset_id", "cleared") if STATE.get("data") else "cleared"
+    empty_schedule = {
+        "team": "Zephyr",
+        "dataset_id": dataset_id,
+        "sessions": [],
+        "fest_week": {
+            "bookings": [],
+            "session_overrides": []
+        },
+        "exams": []
+    }
+    STATE["schedule"] = empty_schedule
+    STATE["schedule_after"] = {"sessions": []}
+    STATE["disruption_pending"] = None
+    STATE["disruption_diff"] = []
+    STATE["active_view"] = "baseline"
+
+    # Persist empty export
+    try:
+        with open(SCHEDULE_PATH, "w", encoding="utf-8") as f:
+            json.dump(empty_schedule, f, indent=2)
+    except Exception:
+        pass
+
+    return {
+        "status": "success",
+        "message": "All current data has been successfully cleared from all tables."
+    }
+
+
 @app.post("/api/admin/reset")
+@app.post("/api/admin/restore-baseline")
 def reset_demo_data():
     """
     CRITICAL JUDGE REQUIREMENT:
@@ -486,7 +537,7 @@ def reset_demo_data():
     load_initial_state()
     return {
         "status": "success",
-        "message": "All demo data and timetable states have been reset to initial baseline."
+        "message": "Baseline dataset and timetable states have been restored."
     }
 
 

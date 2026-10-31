@@ -444,23 +444,52 @@ export default function CampusManager() {
     }
   }
 
-  const resetDemo = async () => {
+  const handleClearData = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/reset`, { method: 'POST' })
+      const res = await fetch(`${API_BASE}/api/admin/clear-data`, { method: 'POST' })
+      if (res.ok) {
+        setSessionsList([])
+        setExamsList([])
+        setBookingsList([])
+        setDisruptionMoves([])
+        setDisruptionHistory([])
+        setDisruptionPreview(false)
+        setDisruptionDecisions({})
+        setFestStats([
+          ['0', 'Booking score', 'violet'],
+          ['0', 'Approved', 'mint'],
+          ['0', 'Alternatives offered', 'peach'],
+          ['0', 'Rejected', 'rose'],
+          ['0', 'Inversions', 'sky'],
+        ])
+        setNotice('All current data has been successfully cleared from all tables.')
+      }
+    } catch {
+      setSessionsList([])
+      setExamsList([])
+      setBookingsList([])
+      setDisruptionMoves([])
+      setNotice('All tables cleared in local state.')
+    }
+  }
+
+  const handleRestoreBaseline = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/restore-baseline`, { method: 'POST' })
       if (res.ok) {
         setActiveView('baseline')
         localStorage.setItem('active_view', 'baseline')
         setDisruptionPreview(false)
-        setNotice('All data cleared and reset to Semester 2027 baseline.')
+        setNotice('Baseline dataset and clash-free timetable restored.')
         const val = filterType === 'group' ? selectedGroup : filterType === 'faculty' ? selectedFaculty : selectedRoom
         fetchSchedule(filterType, val, 'baseline')
         fetchExams()
         fetchBookings()
+        fetchDisruptionHistory()
       }
     } catch {
-      setActiveView('baseline')
-      localStorage.setItem('active_view', 'baseline')
-      setNotice('All data cleared and reset to Semester 2027 baseline.')
+      const val = filterType === 'group' ? selectedGroup : filterType === 'faculty' ? selectedFaculty : selectedRoom
+      fetchSchedule(filterType, val, 'baseline')
     }
   }
 
@@ -817,15 +846,26 @@ export default function CampusManager() {
         </nav>
 
         {/* Directly underneath the AI booking assistant button - stays in sequence during scroll */}
-        <div className="mt-4 pt-3 border-t border-timetable-grid/50 flex flex-col gap-2.5 shrink-0">
-          <button
-            onClick={resetDemo}
-            className="flex w-full items-center gap-2 rounded-xl border border-timetable-grid bg-card/60 px-3 py-2 text-xs font-medium text-foreground hover:bg-card hover:text-destructive transition"
-            title="Clear live session edits and reset to baseline timetable"
-          >
-            <RotateCcw className="size-3.5 text-muted-foreground" />
-            <span>Clear Data</span>
-          </button>
+        <div className="mt-4 pt-3 border-t border-timetable-grid/50 flex flex-col gap-2 shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleClearData}
+              className="flex-1 flex items-center justify-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-600 hover:text-white transition shadow-sm"
+              title="Clear all current data from all tables"
+            >
+              <RotateCcw className="size-3.5" />
+              <span>Clear Data</span>
+            </button>
+
+            <button
+              onClick={handleRestoreBaseline}
+              className="flex items-center justify-center gap-1 rounded-xl border border-timetable-grid bg-secondary/80 px-2.5 py-2 text-xs font-medium text-foreground hover:bg-accent transition shadow-sm"
+              title="Restore baseline schedule dataset"
+            >
+              <History className="size-3.5 text-muted-foreground" />
+              <span>Restore</span>
+            </button>
+          </div>
 
           {/* User Account Card */}
           <div className="rounded-xl border border-timetable-grid bg-card/80 p-3 shadow-sm">
@@ -1048,10 +1088,49 @@ function Heading({ title, children }: { title: string; children?: React.ReactNod
 function Panel({ children, className = '' }: { children: React.ReactNode; className?: string }) { return <section className={`rounded-lg border border-timetable-grid bg-card ${className}`}>{children}</section> }
 
 function useNow() {
-  const [now, setNow] = useState<{ day: number; hour: number } | null>(null)
+  const [now, setNow] = useState<{ day: number; hour: number; timeString: string } | null>(null)
   useEffect(() => {
-    const tick = () => { const d = new Date(); const day = d.getDay() - 1; const hour = d.getHours() + d.getMinutes() / 60; setNow(day >= 0 && day < 5 && hour >= HOUR_START && hour < HOUR_END ? { day, hour } : { day: 1, hour: 10 + 40 / 60 }) }
-    tick(); const t = setInterval(tick, 60000); return () => clearInterval(t)
+    const tick = () => {
+      const d = new Date()
+      // Extract accurate IST (Asia/Kolkata, UTC+5:30) time parts
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Kolkata',
+        hour12: false,
+        weekday: 'short',
+        hour: 'numeric',
+        minute: 'numeric',
+      })
+      const parts = formatter.formatToParts(d)
+      let weekday = 'Mon'
+      let h = 0
+      let m = 0
+      for (const p of parts) {
+        if (p.type === 'weekday') weekday = p.value
+        if (p.type === 'hour') h = parseInt(p.value, 10)
+        if (p.type === 'minute') m = parseInt(p.value, 10)
+      }
+
+      const daysMap: Record<string, number> = {
+        'Mon': 0, 'Tue': 1, 'Wed': 2, 'Thu': 3, 'Fri': 4, 'Sat': 5, 'Sun': 6
+      }
+      const rawDay = daysMap[weekday] ?? 0
+      // Clamped to Mon-Fri (0..4) for the active column on the weekly timetable
+      const activeDay = rawDay >= 0 && rawDay <= 4 ? rawDay : 0
+      const timeString = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+      const fractionalHour = h + m / 60
+
+      // Keep visual indicator line within timetable display boundaries (8 to 18)
+      const visualHour = Math.min(Math.max(fractionalHour, HOUR_START), HOUR_END - 0.1)
+
+      setNow({
+        day: activeDay,
+        hour: visualHour,
+        timeString
+      })
+    }
+    tick()
+    const timer = setInterval(tick, 1000)
+    return () => clearInterval(timer)
   }, [])
   return now
 }
@@ -1175,9 +1254,32 @@ function Timetable({
             <span className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] leading-tight opacity-75"><span className="flex items-center gap-1"><DoorOpen className="size-3" />{s.room}</span><span className="flex items-center gap-1"><Users className="size-3" />{s.faculty}</span></span>
             {s.confirmed && s.end - s.start >= 1.5 && <span className="mt-1.5"><Confirmed /></span>}
           </button>)}
-          {now?.day === di && <div className="pointer-events-none absolute inset-x-0 z-10 h-0.5 bg-now" style={{ top: (now.hour - HOUR_START) * HOUR_PX }}><span className="absolute -left-14 -top-3 rounded-full bg-now px-2.5 py-0.5 text-xs font-medium text-ink-foreground">{fmt(now.hour)}</span></div>}
+          {now?.day === di && (
+            <div
+              className="pointer-events-none absolute inset-x-0 z-10 h-0.5 bg-now"
+              style={{ top: (now.hour - HOUR_START) * HOUR_PX }}
+            >
+              <span
+                className="absolute -left-14 -top-3 rounded-full bg-now px-2 py-0.5 text-[11px] font-bold text-white shadow-sm flex items-center justify-center tracking-tight"
+                title={`Live IST Time: ${now.timeString}`}
+              >
+                {now.timeString}
+              </span>
+            </div>
+          )}
         </div>)}
       </div>
+      {list.length === 0 && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-20 bg-background/50 backdrop-blur-[1px]">
+          <div className="rounded-2xl border border-timetable-grid bg-card/95 p-6 text-center max-w-sm shadow-xl pointer-events-auto">
+            <CalendarDays className="size-8 mx-auto text-muted-foreground opacity-60 mb-2" />
+            <p className="text-sm font-semibold text-foreground">All Table Data Cleared</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              All tables are currently empty. Click &apos;Restore&apos; in the menu or load a dataset JSON to repopulate.
+            </p>
+          </div>
+        </div>
+      )}
     </div></div>
   </div>
 }

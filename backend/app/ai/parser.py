@@ -8,7 +8,11 @@ import os
 import re
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+
+# Load environment variables from .env
+load_dotenv()
 
 
 class ParsedBookingRequest(BaseModel):
@@ -206,6 +210,8 @@ def parse_booking_prompt(text: str, rooms_data: List[Dict[str, Any]] = None) -> 
     and runs deterministic checks against actual campus rooms data.
     """
     api_key = os.environ.get("GEMINI_API_KEY")
+    if api_key:
+        api_key = api_key.strip("'\" \t\r\n")
     result: Optional[ParsedBookingRequest] = None
 
     if api_key:
@@ -215,15 +221,23 @@ def parse_booking_prompt(text: str, rooms_data: List[Dict[str, Any]] = None) -> 
 
             client = genai.Client(api_key=api_key)
             prompt = f"{SYSTEM_PROMPT}\n\nUser request: \"{text}\"\n\nJSON Output:"
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=ParsedBookingRequest
-                )
-            )
-            result = ParsedBookingRequest.model_validate_json(response.text)
+            
+            # Attempt with gemini-2.5-flash or gemini-2.0-flash / gemini-1.5-flash
+            for model_name in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=ParsedBookingRequest
+                        )
+                    )
+                    result = ParsedBookingRequest.model_validate_json(response.text)
+                    if result:
+                        break
+                except Exception:
+                    continue
         except Exception as e:
             print(f"Gemini API parse failed ({e}), falling back to offline parser.")
 
