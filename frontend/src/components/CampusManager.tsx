@@ -408,11 +408,17 @@ export default function CampusManager() {
         localStorage.setItem('active_view', 'after_disruption')
         setNotice('Schedule changes approved and committed to live semester timetable.')
         fetchSchedule(selectedGroup, 'after_disruption')
+        fetchDisruptionHistory()
+        // Reset preview so the UI collapses back to the committed state banner
+        setDisruptionPreview(false)
+        setDisruptionDecisions({})
       }
     } catch {
       setActiveView('after_disruption')
       localStorage.setItem('active_view', 'after_disruption')
       setNotice('Schedule changes approved and committed.')
+      setDisruptionPreview(false)
+      setDisruptionDecisions({})
     }
   }
 
@@ -425,12 +431,19 @@ export default function CampusManager() {
         setNotice('Disrupted changes reverted. Baseline timetable is now active.')
         fetchSchedule(selectedGroup, 'baseline')
         fetchDisruptionHistory()
+        // Collapse preview and clear state so UI resets cleanly
+        setDisruptionPreview(false)
+        setDisruptionDecisions({})
+        setDisruptionMoves(defaultMoves)
       }
     } catch {
       setActiveView('baseline')
       localStorage.setItem('active_view', 'baseline')
       setNotice('Disrupted changes reverted to baseline.')
       fetchDisruptionHistory()
+      setDisruptionPreview(false)
+      setDisruptionDecisions({})
+      setDisruptionMoves(defaultMoves)
     }
   }
 
@@ -483,6 +496,9 @@ export default function CampusManager() {
         setNotice(`Disruption moves committed (${data.summary}).`)
         fetchSchedule(selectedGroup, 'after_disruption')
         fetchDisruptionHistory()
+        // Collapse the preview cards after committing
+        setDisruptionPreview(false)
+        setDisruptionDecisions({})
       }
     } catch {
       handleApproveDisruption()
@@ -499,6 +515,10 @@ export default function CampusManager() {
         setNotice(data.message)
         fetchSchedule(selectedGroup, data.active_view)
         fetchDisruptionHistory()
+        // Reset preview state so the timetable reflects the rolled-back version
+        setDisruptionPreview(false)
+        setDisruptionDecisions({})
+        setDisruptionMoves(defaultMoves)
       }
     } catch {}
   }
@@ -751,6 +771,32 @@ function Disruption({
   availableRooms: string[]
 }) {
   const [activeSubTab, setActiveSubTab] = useState<'simulation' | 'history'>('simulation')
+  const [busy, setBusy] = useState(false)
+
+  const wrappedApplyMoves = async () => {
+    setBusy(true)
+    await onApplyMoves()
+    setBusy(false)
+  }
+
+  const wrappedApprove = async () => {
+    setBusy(true)
+    await onApprove()
+    setBusy(false)
+  }
+
+  const wrappedRevert = async () => {
+    setBusy(true)
+    await onRevert()
+    setBusy(false)
+  }
+
+  const wrappedRollback = async (id: number) => {
+    setBusy(true)
+    await onRollback(id)
+    setActiveSubTab('simulation')
+    setBusy(false)
+  }
 
   // Helper to extract default proposed room from move string
   const getProposedRoom = (m: string[]) => {
@@ -973,14 +1019,17 @@ function Disruption({
                   </div>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={onApplyMoves}
-                      className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition"
+                      onClick={wrappedApplyMoves}
+                      disabled={busy}
+                      className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition disabled:opacity-50"
                     >
+                      {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
                       Update & Re-commit Decisions
                     </button>
                     <button
-                      onClick={onRevert}
-                      className="rounded-full border border-timetable-grid bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition"
+                      onClick={wrappedRevert}
+                      disabled={busy}
+                      className="rounded-full border border-timetable-grid bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition disabled:opacity-50"
                     >
                       Revert to Baseline Schedule
                     </button>
@@ -994,14 +1043,17 @@ function Disruption({
                   </div>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={onApplyMoves}
-                      className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition"
+                      onClick={wrappedApplyMoves}
+                      disabled={busy}
+                      className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition disabled:opacity-50"
                     >
+                      {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
                       Commit Reviewed Decisions
                     </button>
                     <button
-                      onClick={onApprove}
-                      className="rounded-full border border-timetable-grid bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition"
+                      onClick={wrappedApprove}
+                      disabled={busy}
+                      className="rounded-full border border-timetable-grid bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition disabled:opacity-50"
                     >
                       Accept All & Commit
                     </button>
@@ -1106,10 +1158,11 @@ function Disruption({
                     <div className="shrink-0">
                       <button
                         type="button"
-                        onClick={() => onRollback(item.id)}
-                        className="flex items-center gap-1.5 rounded-full border border-timetable-grid bg-secondary px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-ink hover:text-ink-foreground transition"
+                        onClick={() => wrappedRollback(item.id)}
+                        disabled={busy}
+                        className="flex items-center gap-1.5 rounded-full border border-timetable-grid bg-secondary px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-ink hover:text-ink-foreground transition disabled:opacity-50"
                       >
-                        <History className="size-3.5" />
+                        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <History className="size-3.5" />}
                         Rollback to this state
                       </button>
                     </div>
