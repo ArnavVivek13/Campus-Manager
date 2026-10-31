@@ -80,3 +80,4 @@ Public registration is disabled to prevent unauthorized account creation. Evalua
 ### Backend: Render / Railway or Vercel Serverless
 - **Render / Railway (Recommended):** Build command `pip install -r requirements.txt`, start command `uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT`.
 - **Vercel Serverless:** The repository includes `api/index.py` configured for Vercel Python serverless execution.
+

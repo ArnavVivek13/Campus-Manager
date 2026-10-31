@@ -369,6 +369,85 @@ def preview_sample_disruption():
     }
 
 
+@app.post("/api/disruption/upload")
+async def upload_disruption_endpoint(file: UploadFile = File(None)):
+    """
+    Allows Admin to upload a custom disruption JSON file (e.g. sample_disruption.json or judge's test).
+    Applies the disruption, solves with minimal perturbation CP-SAT solver, and returns diff.
+    """
+    if not file:
+        raise HTTPException(status_code=400, detail="No disruption file provided.")
+    if not STATE.get("data") or not STATE.get("schedule"):
+        raise HTTPException(status_code=400, detail="Please load or restore baseline dataset first.")
+
+    try:
+        content = await file.read()
+        disruption = json.loads(content.decode("utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid disruption JSON format: {str(e)}")
+
+    try:
+        dis_data = validator.apply_disruption(STATE["data"], disruption)
+        base_map = {s["session_id"]: s for s in STATE["schedule"].get("sessions", [])}
+        baseline_tuples = {
+            s["session_id"]: (s["day"], s["start_period"], s["room_id"])
+            for s in STATE["schedule"].get("sessions", [])
+        }
+
+        t_solver = TimetableSolver(dis_data, time_limit_seconds=25.0)
+        re_res = t_solver.solve(baseline=baseline_tuples, stability_weight_time=1000, stability_weight_room=100)
+        if not re_res["solvable"]:
+            raise HTTPException(status_code=422, detail="Disruption could not be resolved without constraint clashes.")
+
+        re_assign = re_res["assignment"]
+
+        schedule_after = {
+            "team": "Zephyr",
+            "dataset_id": dis_data.get("dataset_id", "disrupted"),
+            "sessions": [
+                {
+                    "session_id": sid,
+                    "day": val["day"],
+                    "start_period": val["start_period"],
+                    "room_id": val["room_id"]
+                }
+                for sid, val in re_assign.items()
+            ],
+            "fest_week": STATE["schedule"].get("fest_week", {}),
+            "exams": STATE["schedule"].get("exams", [])
+        }
+
+        STATE["schedule_after"] = schedule_after
+
+        diff = []
+        for sid, after in re_assign.items():
+            base = base_map.get(sid)
+            if not base:
+                diff.append({"session_id": sid, "change_type": "new_session_added", "to": after})
+            elif base["day"] != after["day"] or base["start_period"] != after["start_period"] or base["room_id"] != after["room_id"]:
+                diff.append({
+                    "session_id": sid,
+                    "change_type": "time_and_room_moved" if (base["day"] != after["day"] or base["start_period"] != after["start_period"]) else "room_only_moved",
+                    "from": base,
+                    "to": after
+                })
+
+        STATE["disruption_pending"] = disruption
+        STATE["disruption_diff"] = diff
+
+        return {
+            "status": "success",
+            "disruption": disruption,
+            "moved_count": len(diff),
+            "changes": diff,
+            "message": f"Disruption solved successfully. {len(diff)} sessions relocated."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error solving disruption: {str(e)}")
+
+
 @app.post("/api/disruption/approve")
 def approve_disruption():
     """Admin approves disruption, switching active timetable to repaired schedule."""

@@ -276,3 +276,4 @@ def toggle_user_status(
         "is_active": target_user.is_active,
         "message": f"User '{target_user.email}' has been {state_label}."
     }
+

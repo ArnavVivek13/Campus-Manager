@@ -588,6 +588,36 @@ export default function CampusManager() {
     }
   }
 
+  const handleUploadDisruption = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      const res = await fetch(`${API_BASE}/api/disruption/upload`, {
+        method: 'POST',
+        body: formData
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Failed to process disruption file')
+      if (Array.isArray(data.changes)) {
+        const mapped = data.changes.map((c: any) => [
+          c.session_id,
+          c.session_id + (c.change_type === 'new_session_added' ? ' (new)' : ''),
+          c.from ? `Original: ${c.from.day} P${c.from.start_period} · ${c.from.room_id}` : 'New session',
+          c.to ? `Moved to: ${c.to.day} P${c.to.start_period} · ${c.to.room_id}` : 'Unscheduled'
+        ])
+        setDisruptionMoves(mapped)
+      }
+      setDisruptionPreview(true)
+      showToast(data.message || 'Custom disruption solved with minimal perturbation!', 'success')
+    } catch (err: any) {
+      showToast(err.message || 'Error processing disruption', 'error')
+    } finally {
+      if (e.target) e.target.value = ''
+    }
+  }
+
   const handleApproveDisruption = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/disruption/approve`, { method: 'POST' })
@@ -1091,6 +1121,7 @@ export default function CampusManager() {
               history={disruptionHistory}
               onRollback={handleRollback}
               availableRooms={availableRooms}
+              onUploadDisruption={handleUploadDisruption}
             />
           )}
           {activeTab === 4 && <Assistant bookingText={bookingText} setBookingText={setBookingText} parsed={parsed} parsedData={parsedData} submitBooking={submitBooking} confirmBooking={confirmBookingDb} venuesList={venuesList} />}
@@ -1516,7 +1547,8 @@ function Disruption({
   onApplyMoves,
   history,
   onRollback,
-  availableRooms
+  availableRooms,
+  onUploadDisruption
 }: {
   preview: boolean
   moves: string[][]
@@ -1530,6 +1562,7 @@ function Disruption({
   history: any[]
   onRollback: (logId: number) => void
   availableRooms: string[]
+  onUploadDisruption?: (e: React.ChangeEvent<HTMLInputElement>) => void
 }) {
   const [activeSubTab, setActiveSubTab] = useState<'simulation' | 'history'>('simulation')
   const [busy, setBusy] = useState(false)
@@ -1611,12 +1644,22 @@ function Disruption({
               </p>
             </div>
             <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1.5 rounded-full border border-timetable-grid bg-card px-3.5 py-2 text-xs font-semibold text-foreground hover:bg-muted transition cursor-pointer shadow-sm">
+                <Upload className="size-3.5 text-muted-foreground" />
+                <span>Upload Disruption JSON</span>
+                <input
+                  type="file"
+                  accept=".json"
+                  className="hidden"
+                  onChange={onUploadDisruption}
+                />
+              </label>
               <button
                 onClick={onPreview}
                 className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition"
               >
                 <GitCompareArrows className="size-4" />
-                {preview ? 'Hide diff' : 'Show changes'}
+                {preview ? 'Hide diff' : 'Simulate LAB-1 Closure'}
               </button>
             </div>
           </div>
