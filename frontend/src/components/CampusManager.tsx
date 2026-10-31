@@ -602,32 +602,48 @@ export default function CampusManager() {
     setAiLoading(false)
   }
 
-  const handleRoleChange = async (newRole: string) => {
-    setRole(newRole)
-    const roleEnumMap: Record<string, string> = {
-      'Admin': 'ADMIN',
-      'Department Coordinator': 'ADMIN',
-      'Faculty': 'FACULTY',
-      'Club Representative': 'CLUB_LEAD'
+  const userRole = currentUser?.role || 'STUDENT'
+
+  const accessibleTabs = useMemo(() => {
+    if (userRole === 'ADMIN') {
+      return [
+        { name: 'Master Timetable', icon: CalendarDays, tabIndex: 0 },
+        { name: 'Spectra Fest', icon: Sparkles, tabIndex: 1 },
+        { name: 'Midsem Exams', icon: GraduationCap, tabIndex: 2 },
+        { name: 'Disruption Studio', icon: GitCompareArrows, tabIndex: 3 },
+        { name: 'AI Booking Assistant', icon: Bot, tabIndex: 4 },
+      ]
     }
-    const targetRole = roleEnumMap[newRole] || 'STUDENT'
-    try {
-      const res = await fetch(`${API_BASE}/api/auth/oauth/demo-login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: targetRole })
-      })
-      if (res.ok) {
-        const data = await res.json()
-        if (data.access_token) {
-          localStorage.setItem('auth_token', data.access_token)
-          localStorage.setItem('auth_user', JSON.stringify(data.user))
-          setCurrentUser(data.user)
-          setNotice(`Authenticated as ${data.user.full_name} (${data.user.role})`)
-        }
-      }
-    } catch {}
-  }
+    if (userRole === 'FACULTY') {
+      return [
+        { name: 'Master Timetable', icon: CalendarDays, tabIndex: 0 },
+        { name: 'Spectra Fest', icon: Sparkles, tabIndex: 1 },
+        { name: 'Midsem Exams', icon: GraduationCap, tabIndex: 2 },
+        { name: 'Disruption Studio', icon: GitCompareArrows, tabIndex: 3 },
+        { name: 'AI Booking Assistant', icon: Bot, tabIndex: 4 },
+      ]
+    }
+    if (userRole === 'CLUB_LEAD') {
+      return [
+        { name: 'Master Timetable', icon: CalendarDays, tabIndex: 0 },
+        { name: 'Spectra Fest', icon: Sparkles, tabIndex: 1 },
+        { name: 'AI Booking Assistant', icon: Bot, tabIndex: 4 },
+      ]
+    }
+    // STUDENT
+    return [
+      { name: 'Master Timetable', icon: CalendarDays, tabIndex: 0 },
+      { name: 'Spectra Fest', icon: Sparkles, tabIndex: 1 },
+      { name: 'Midsem Exams', icon: GraduationCap, tabIndex: 2 },
+    ]
+  }, [userRole])
+
+  // Ensure activeTab is always one of the user's accessible tabs
+  useEffect(() => {
+    if (!accessibleTabs.some(t => t.tabIndex === activeTab)) {
+      setActiveTab(accessibleTabs[0]?.tabIndex ?? 0)
+    }
+  }, [accessibleTabs, activeTab])
 
   const handleLogout = () => {
     localStorage.removeItem('auth_token')
@@ -681,9 +697,66 @@ export default function CampusManager() {
           <button onClick={() => setMenuOpen(false)} aria-label="Close menu" className="lg:pointer-events-none"><PanelLeft className="size-5 text-foreground/70" /></button>
         </div>
         <p className="mt-9 mb-3 text-sm text-muted-foreground">Main menu</p>
-        <nav className="flex flex-col gap-1" role="tablist">{tabs.map((tab, i) => { const Icon = tabIcons[i] ?? CalendarDays; return <button key={tab} role="tab" aria-selected={activeTab === i} onClick={() => { setActiveTab(i); setMenuOpen(false) }} className={`flex items-center gap-3 rounded-full px-4 py-2.5 text-left text-sm transition ${activeTab === i ? 'bg-card/80 font-medium shadow-sm' : 'text-foreground/80 hover:bg-card/50'}`}><Icon className="size-4 shrink-0" />{tab}</button> })}</nav>
-        <p className="mt-8 mb-3 text-sm text-muted-foreground">Switch Role</p>
-        <div className="flex flex-col gap-1">{roles.map(r => <button key={r} onClick={() => handleRoleChange(r)} className={`flex items-center gap-3 rounded-full px-4 py-2 text-left text-[13px] transition ${role === r ? 'bg-card/80 font-medium' : 'text-foreground/70 hover:bg-card/50'}`}><Users className="size-3.5" />{r}</button>)}</div>
+        <nav className="flex flex-col gap-1" role="tablist">
+          {accessibleTabs.map(tab => {
+            const Icon = tab.icon
+            const isSelected = activeTab === tab.tabIndex
+            return (
+              <button
+                key={tab.name}
+                role="tab"
+                aria-selected={isSelected}
+                onClick={() => {
+                  setActiveTab(tab.tabIndex)
+                  setMenuOpen(false)
+                }}
+                className={`flex items-center gap-3 rounded-full px-4 py-2.5 text-left text-sm transition ${
+                  isSelected
+                    ? 'bg-card/80 font-medium shadow-sm'
+                    : 'text-foreground/80 hover:bg-card/50'
+                }`}
+              >
+                <Icon className="size-4 shrink-0" />
+                {tab.name}
+              </button>
+            )
+          })}
+        </nav>
+
+        <p className="mt-8 mb-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          Role & Permissions
+        </p>
+        <div className="rounded-xl border border-timetable-grid bg-card/60 p-3">
+          <div className="flex items-center gap-2">
+            <span className={`size-2 rounded-full ${
+              currentUser.role === 'ADMIN'
+                ? 'bg-emerald-500'
+                : currentUser.role === 'FACULTY'
+                ? 'bg-blue-500'
+                : currentUser.role === 'CLUB_LEAD'
+                ? 'bg-purple-500'
+                : 'bg-amber-500'
+            }`} />
+            <span className="text-xs font-bold text-foreground tracking-wide">
+              {currentUser.role}
+            </span>
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-1 truncate">
+            {currentUser.department || 'Campus Community'}
+          </p>
+          <div className="mt-2.5 pt-2 border-t border-timetable-grid/50 flex items-center justify-between text-[10px] text-muted-foreground">
+            <span>Privileges:</span>
+            <span className="font-medium text-foreground">
+              {currentUser.role === 'ADMIN'
+                ? 'Full Administration'
+                : currentUser.role === 'FACULTY'
+                ? 'Faculty Scheduling'
+                : currentUser.role === 'CLUB_LEAD'
+                ? 'Club Booking Lead'
+                : 'Student Read-Only'}
+            </span>
+          </div>
+        </div>
         <div className="mt-auto pt-6">
           <button onClick={resetDemo} className="flex w-full items-center gap-3 rounded-full px-4 py-2 text-[13px] text-destructive hover:bg-card/50"><RotateCcw className="size-3.5" />Reset Demo Data</button>
           
