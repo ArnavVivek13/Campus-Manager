@@ -1,8 +1,8 @@
 import React from 'react'
 import { useEffect, useMemo, useState, useRef } from 'react'
-import { AlertTriangle, Bot, CalendarDays, Check, ChevronRight, CircleCheck, Clock3, Command, DoorOpen, GitCompareArrows, GraduationCap, MessageSquareText, MoreHorizontal, PanelLeft, Pencil, RotateCcw, Send, SlidersHorizontal, Sparkles, Users, X, Menu, Moon, Sun, Loader2, History, CheckCircle2, XCircle, ArrowRight, LogOut, Lock, Mail, Eye, EyeOff, ShieldCheck, UserPlus, Download, Upload } from 'lucide-react'
+import { AlertTriangle, Bot, CalendarDays, Check, ChevronRight, CircleCheck, Clock3, Command, DoorOpen, GitCompareArrows, GraduationCap, MessageSquareText, MoreHorizontal, PanelLeft, Pencil, RotateCcw, Send, SlidersHorizontal, Sparkles, Users, X, Menu, Moon, Sun, Loader2, History, CheckCircle2, XCircle, ArrowRight, LogOut, Lock, Mail, Eye, EyeOff, ShieldCheck, UserPlus, Download, Upload, Trash2, UserCheck, UserX, RefreshCw } from 'lucide-react'
 
-const API_BASE = 'http://127.0.0.1:8000'
+const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://127.0.0.1:8000'
 
 type AuthUser = {
   id: number
@@ -173,19 +173,29 @@ export default function CampusManager() {
   const [datasetLoading, setDatasetLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Live Backend State
+  // Live Backend State - Initialized empty by default as requested
   const [selectedWeek, setSelectedWeek] = useState<number>(7)
-  const [sessionsList, setSessionsList] = useState<Session[]>(defaultSessions)
-  const [examsList, setExamsList] = useState<string[][]>(defaultExams)
-  const [bookingsList, setBookingsList] = useState<string[][]>(defaultBookings)
+  const [sessionsList, setSessionsList] = useState<Session[]>([])
+  const [examsList, setExamsList] = useState<string[][]>([])
+  const [bookingsList, setBookingsList] = useState<string[][]>([])
   const [festStats, setFestStats] = useState<[string, string, Hue][]>([
-    ['64.5/70', 'Booking score', 'violet'],
-    ['21', 'Approved', 'mint'],
-    ['2', 'Alternatives offered', 'peach'],
-    ['2', 'Rejected', 'rose'],
+    ['0/0', 'Booking score', 'violet'],
+    ['0', 'Approved', 'mint'],
+    ['0', 'Alternatives offered', 'peach'],
+    ['0', 'Rejected', 'rose'],
     ['0', 'Inversions', 'sky'],
   ])
-  const [disruptionMoves, setDisruptionMoves] = useState<string[][]>(defaultMoves)
+  const [disruptionMoves, setDisruptionMoves] = useState<string[][]>([])
+
+  // User-Action Floating Toast Notifications
+  const [toasts, setToasts] = useState<{ id: string; message: string; type: 'success' | 'error' | 'info' }[]>([])
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Math.random().toString(36).substring(2, 9)
+    setToasts(prev => [...prev, { id, message, type }])
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id))
+    }, 4500)
+  }
   const [disruptionDecisions, setDisruptionDecisions] = useState<Record<string, { action: 'ACCEPT' | 'REJECT' | 'REASSIGN'; room_id: string }>>({})
   const [disruptionHistory, setDisruptionHistory] = useState<any[]>([])
   const [availableRooms, setAvailableRooms] = useState<string[]>([
@@ -334,7 +344,7 @@ export default function CampusManager() {
       const res = await fetch(`${API_BASE}/api/exams`)
       if (!res.ok) return
       const data = await res.json()
-      if (Array.isArray(data.exams) && data.exams.length > 0) {
+      if (Array.isArray(data.exams)) {
         const mapped = data.exams.map((e: any) => [
           e.day,
           e.session,
@@ -353,7 +363,7 @@ export default function CampusManager() {
       const res = await fetch(`${API_BASE}/api/fest/bookings`)
       if (!res.ok) return
       const data = await res.json()
-      if (Array.isArray(data.bookings) && data.bookings.length > 0) {
+      if (Array.isArray(data.bookings)) {
         const mapped = data.bookings.map((b: any) => {
           const req = b.request || {}
           const statusLabel = b.status === 'approved' ? 'Approved' : b.status === 'alternative_offered' ? 'Alternative Offered' : 'Rejected'
@@ -466,6 +476,7 @@ export default function CampusManager() {
           ['0', 'Inversions', 'sky'],
         ])
         setNotice('All current data has been successfully cleared from all tables.')
+        showToast('All timetable, exam, and booking data cleared successfully.', 'success')
       }
     } catch {
       setSessionsList([])
@@ -473,6 +484,7 @@ export default function CampusManager() {
       setBookingsList([])
       setDisruptionMoves([])
       setNotice('All tables cleared in local state.')
+      showToast('All tables cleared in local state.', 'info')
     }
   }
 
@@ -484,6 +496,7 @@ export default function CampusManager() {
         localStorage.setItem('active_view', 'baseline')
         setDisruptionPreview(false)
         setNotice('Baseline dataset and clash-free timetable restored.')
+        showToast('Baseline CIT semester timetable & bookings restored.', 'success')
         const val = filterType === 'group' ? selectedGroup : filterType === 'faculty' ? selectedFaculty : selectedRoom
         fetchSchedule(filterType, val, 'baseline')
         fetchExams()
@@ -493,11 +506,29 @@ export default function CampusManager() {
     } catch {
       const val = filterType === 'group' ? selectedGroup : filterType === 'faculty' ? selectedFaculty : selectedRoom
       fetchSchedule(filterType, val, 'baseline')
+      showToast('Restored baseline in local mode.', 'info')
     }
   }
 
-  const handleExportSchedule = () => {
-    window.open(`${API_BASE}/api/export/schedule`, '_blank')
+  const handleExportSchedule = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/export/schedule`)
+      if (!res.ok) throw new Error('Failed to generate schedule.json')
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'schedule.json'
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+      showToast('schedule.json downloaded successfully!', 'success')
+    } catch (err: any) {
+      // Fallback
+      window.open(`${API_BASE}/api/export/schedule`, '_blank')
+      showToast('Schedule export initiated.', 'info')
+    }
   }
 
   const handleLoadDataset = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -516,13 +547,14 @@ export default function CampusManager() {
         throw new Error(data.detail || 'Failed to load dataset.')
       }
       setNotice(`${data.message || 'Dataset loaded.'} Timetable verified with 0 hard violations.`)
+      showToast(`Dataset loaded & solved clash-free! (${data.total_sessions || ''} sessions)`, 'success')
       const val = filterType === 'group' ? selectedGroup : filterType === 'faculty' ? selectedFaculty : selectedRoom
       fetchSchedule(filterType, val, 'baseline')
       fetchExams()
       fetchBookings()
       fetchMetadata()
     } catch (err: any) {
-      alert(err.message || 'Error loading dataset file.')
+      showToast(err.message || 'Error loading dataset file.', 'error')
     } finally {
       setDatasetLoading(false)
       if (e.target) e.target.value = ''
@@ -708,6 +740,7 @@ export default function CampusManager() {
         { name: 'Midsem Exams', icon: GraduationCap, tabIndex: 2 },
         { name: 'Disruption Studio', icon: GitCompareArrows, tabIndex: 3 },
         { name: 'AI Booking Assistant', icon: Bot, tabIndex: 4 },
+        { name: 'User Management', icon: ShieldCheck, tabIndex: 5 },
       ]
     }
     if (userRole === 'FACULTY') {
@@ -1061,8 +1094,43 @@ export default function CampusManager() {
             />
           )}
           {activeTab === 4 && <Assistant bookingText={bookingText} setBookingText={setBookingText} parsed={parsed} parsedData={parsedData} submitBooking={submitBooking} confirmBooking={confirmBookingDb} venuesList={venuesList} />}
+          {activeTab === 5 && <UserManagementTab showToast={showToast} />}
         </div>
       </div>
+    </div>
+
+    {/* Floating Toast Notification Container */}
+    <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none max-w-sm">
+      {toasts.map(t => (
+        <div
+          key={t.id}
+          className={`pointer-events-auto flex items-center gap-3 rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 animate-in fade-in slide-in-from-bottom-2 ${
+            t.type === 'success'
+              ? 'bg-card border-emerald-500/40 text-foreground'
+              : t.type === 'error'
+              ? 'bg-card border-rose-500/40 text-foreground'
+              : 'bg-card border-sky-500/40 text-foreground'
+          }`}
+        >
+          <div className={`p-1.5 rounded-full shrink-0 ${
+            t.type === 'success' ? 'bg-emerald-500/10 text-emerald-500' :
+            t.type === 'error' ? 'bg-rose-500/10 text-rose-500' :
+            'bg-sky-500/10 text-sky-500'
+          }`}>
+            {t.type === 'success' && <CircleCheck className="size-4" />}
+            {t.type === 'error' && <AlertTriangle className="size-4" />}
+            {t.type === 'info' && <Sparkles className="size-4" />}
+          </div>
+          <span className="text-xs font-medium leading-relaxed">{t.message}</span>
+          <button
+            onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))}
+            className="ml-auto text-muted-foreground hover:text-foreground p-0.5"
+            aria-label="Close notification"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      ))}
     </div>
 
     {selected && <aside className="fixed inset-y-0 right-0 z-20 w-full max-w-md border-l border-timetable-grid bg-card p-6 shadow-2xl">
@@ -1316,6 +1384,17 @@ function Timetable({
       </div>
     </div>
 
+    {/* Empty State Banner if no sessions are loaded */}
+    {list.length === 0 && (
+      <div className="mb-4 rounded-xl border border-dashed border-timetable-grid p-8 text-center bg-card/40">
+        <CalendarDays className="mx-auto size-8 text-muted-foreground/50 mb-2" />
+        <p className="text-sm font-semibold text-foreground">Timetable is currently empty</p>
+        <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto leading-relaxed">
+          Initial schedule data is kept empty. As an Administrator, click <strong>&quot;Restore Baseline&quot;</strong> in the sidebar to load the semester dataset, or upload a dataset JSON file.
+        </p>
+      </div>
+    )}
+
     <div className="overflow-x-auto"><div className="min-w-[900px]">
       <div className="grid grid-cols-[72px_repeat(5,1fr)] border-b border-timetable-grid text-sm">
         <div className="border-r border-timetable-grid" />
@@ -1379,12 +1458,20 @@ function Fest({ rows, stats, filter, setFilter, onSelect }: { rows: string[][]; 
   return <div>
     <Heading title="Spectra Fest · Week 7">{['All', 'Approved', 'Alternative Offered', 'Rejected'].map(f => <Pill key={f} active={filter === f} onClick={() => setFilter(f)}>{f}</Pill>)}</Heading>
     <div className="grid gap-3 sm:grid-cols-5">{stats.map(([v, l, h]) => <div key={l} className={`rounded-none border border-timetable-grid p-4 ${hue[h]}`}><p className="text-2xl font-semibold tracking-tight">{v}</p><p className="mt-1 text-xs opacity-80">{l}</p></div>)}</div>
-    <div className="mt-5 grid gap-3 md:grid-cols-2">{rows.map(r => <button key={r[0]} onClick={() => onSelect(r)} className={`flex flex-col justify-center rounded-none border border-timetable-grid p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md ${hue[r[5] === 'Approved' ? 'mint' : r[5] === 'Rejected' ? 'rose' : 'peach']}`}>
-      <div className="flex items-start justify-between"><div><p className="text-[13px] font-medium leading-tight">{r[1]}</p><p className="mt-0.5 text-[11px] opacity-75">{r[3]}</p></div><MoreHorizontal className="size-3.5" /></div>
-      <p className="mt-3 text-[11px] opacity-75">{r[0]} · {r[2]}</p>
-      <p className="mt-1 flex items-center gap-1 text-[11px] opacity-75"><DoorOpen className="size-3" />{r[4]}</p>
-      <div className="mt-4"><StatusChip label={r[5] ?? ''} /></div>
-    </button>)}</div>
+    {rows.length === 0 ? (
+      <div className="mt-5 rounded-xl border border-dashed border-timetable-grid p-8 text-center bg-card/40">
+        <Sparkles className="mx-auto size-8 text-muted-foreground/50 mb-2" />
+        <p className="text-sm font-semibold text-foreground">No fest venue bookings found</p>
+        <p className="text-xs text-muted-foreground mt-1">Bookings will appear once submitted via the AI Assistant or when the baseline dataset is restored.</p>
+      </div>
+    ) : (
+      <div className="mt-5 grid gap-3 md:grid-cols-2">{rows.map(r => <button key={r[0]} onClick={() => onSelect(r)} className={`flex flex-col justify-center rounded-none border border-timetable-grid p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md ${hue[r[5] === 'Approved' ? 'mint' : r[5] === 'Rejected' ? 'rose' : 'peach']}`}>
+        <div className="flex items-start justify-between"><div><p className="text-[13px] font-medium leading-tight">{r[1]}</p><p className="mt-0.5 text-[11px] opacity-75">{r[3]}</p></div><MoreHorizontal className="size-3.5" /></div>
+        <p className="mt-3 text-[11px] opacity-75">{r[0]} · {r[2]}</p>
+        <p className="mt-1 flex items-center gap-1 text-[11px] opacity-75"><DoorOpen className="size-3" />{r[4]}</p>
+        <div className="mt-4"><StatusChip label={r[5] ?? ''} /></div>
+      </button>)}</div>
+    )}
   </div>
 }
 
@@ -1393,19 +1480,27 @@ function ExamGrid({ list, onSelect }: { list: string[][]; onSelect: (e: string[]
   const filtered = list.filter(e => cat === 'All' || e[1] === cat)
   return <div>
     <Heading title="Midsem Exams · 14–19 Oct">{['All', 'AM', 'PM'].map(c => <Pill key={c} active={cat === c} onClick={() => setCat(c)}>{c === 'All' ? 'All' : c === 'AM' ? 'Morning' : 'Afternoon'}</Pill>)}</Heading>
-    <div className="overflow-x-auto"><div className="grid min-w-[860px] grid-cols-[72px_repeat(6,1fr)] border-b border-timetable-grid">
-      <div className="border-b border-r border-timetable-grid" />{['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map((d, i) => <div key={d} className="border-b border-r border-timetable-grid py-1.5 text-center text-sm text-foreground/80 last:border-r-0">{14 + i} - {d.charAt(0) + d.slice(1).toLowerCase()}</div>)}
-      {['AM', 'PM'].map(slot => <React.Fragment key={slot}>
-        <div className="border-b border-r border-timetable-grid pt-3 text-sm text-foreground/80 pr-2 text-right">{slot === 'AM' ? '09:30' : '14:00'}<p className="text-[11px] text-muted-foreground">{slot === 'AM' ? 'to 11:30' : 'to 16:00'}</p></div>
-        {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(d => { const e = filtered.find(x => x[0] === d && x[1] === slot); return <div key={d} className="min-h-[170px] border-b border-r border-timetable-grid last:border-r-0">{e && <button onClick={() => onSelect(e)} className={`flex h-full w-full flex-col justify-center rounded-none border border-timetable-grid p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md ${hue[slot === 'AM' ? 'sky' : 'violet']}`}>
-          <div className="flex items-start justify-between"><span className="text-[13px] font-medium leading-tight">{e[3]}</span><MoreHorizontal className="size-3.5 shrink-0" /></div>
-          <span className="text-[11px] opacity-75">{e[2]}</span>
-          <span className="mt-2 text-[10px] opacity-75">{e[4]}</span>
-          <span className="mt-1 flex items-center gap-1 text-[10px] opacity-75"><DoorOpen className="size-3" />{e[5]}</span>
-          <span className="mt-3"><Confirmed /></span>
-        </button>}</div> })}
-      </React.Fragment>)}
-    </div></div>
+    {list.length === 0 ? (
+      <div className="mt-5 rounded-xl border border-dashed border-timetable-grid p-8 text-center bg-card/40">
+        <GraduationCap className="mx-auto size-8 text-muted-foreground/50 mb-2" />
+        <p className="text-sm font-semibold text-foreground">No midsem exams scheduled</p>
+        <p className="text-xs text-muted-foreground mt-1">Exam slots will populate once a dataset is loaded or restored by an Administrator.</p>
+      </div>
+    ) : (
+      <div className="overflow-x-auto"><div className="grid min-w-[860px] grid-cols-[72px_repeat(6,1fr)] border-b border-timetable-grid">
+        <div className="border-b border-r border-timetable-grid" />{['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map((d, i) => <div key={d} className="border-b border-r border-timetable-grid py-1.5 text-center text-sm text-foreground/80 last:border-r-0">{14 + i} - {d.charAt(0) + d.slice(1).toLowerCase()}</div>)}
+        {['AM', 'PM'].map(slot => <React.Fragment key={slot}>
+          <div className="border-b border-r border-timetable-grid pt-3 text-sm text-foreground/80 pr-2 text-right">{slot === 'AM' ? '09:30' : '14:00'}<p className="text-[11px] text-muted-foreground">{slot === 'AM' ? 'to 11:30' : 'to 16:00'}</p></div>
+          {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(d => { const e = filtered.find(x => x[0] === d && x[1] === slot); return <div key={d} className="min-h-[170px] border-b border-r border-timetable-grid last:border-r-0">{e && <button onClick={() => onSelect(e)} className={`flex h-full w-full flex-col justify-center rounded-none border border-timetable-grid p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md ${hue[slot === 'AM' ? 'sky' : 'violet']}`}>
+            <div className="flex items-start justify-between"><span className="text-[13px] font-medium leading-tight">{e[3]}</span><MoreHorizontal className="size-3.5 shrink-0" /></div>
+            <span className="text-[11px] opacity-75">{e[2]}</span>
+            <span className="mt-2 text-[10px] opacity-75">{e[4]}</span>
+            <span className="mt-1 flex items-center gap-1 text-[10px] opacity-75"><DoorOpen className="size-3" />{e[5]}</span>
+            <span className="mt-3"><Confirmed /></span>
+          </button>}</div> })}
+        </React.Fragment>)}
+      </div></div>
+    )}
   </div>
 }
 
@@ -1892,6 +1987,397 @@ function Assistant({
   </div>
 }
 
+function UserManagementTab({
+  showToast
+}: {
+  showToast: (msg: string, type: 'success' | 'error' | 'info') => void
+}) {
+  const [users, setUsers] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const [email, setEmail] = useState('')
+  const [fullName, setFullName] = useState('')
+  const [role, setRole] = useState('STUDENT')
+  const [department, setDepartment] = useState('Computer Science')
+  const [password, setPassword] = useState('Campus@123')
+  const [batchText, setBatchText] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [showBatchModal, setShowBatchModal] = useState(false)
+
+  const fetchUsers = async () => {
+    setLoading(true)
+    try {
+      const token = localStorage.getItem('auth_token')
+      const res = await fetch(`${API_BASE}/api/admin/users`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!res.ok) throw new Error('Failed to load users')
+      const data = await res.json()
+      setUsers(data)
+    } catch (err: any) {
+      showToast(err.message || 'Error loading campus users', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchUsers()
+  }, [])
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!email.trim() || !fullName.trim()) return
+    setSubmitting(true)
+    try {
+      const token = localStorage.getItem('auth_token')
+      const res = await fetch(`${API_BASE}/api/admin/users`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          email: email.trim(),
+          full_name: fullName.trim(),
+          role,
+          department: department.trim(),
+          password: password.trim()
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Failed to create user')
+      showToast(`User ${data.email} provisioned as ${data.role}`, 'success')
+      setEmail('')
+      setFullName('')
+      fetchUsers()
+    } catch (err: any) {
+      showToast(err.message || 'Error creating user', 'error')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleBatchImport = async () => {
+    if (!batchText.trim()) {
+      showToast('Please provide user lines to import', 'error')
+      return
+    }
+    setSubmitting(true)
+    try {
+      const token = localStorage.getItem('auth_token')
+      const res = await fetch(`${API_BASE}/api/admin/users/batch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ raw_text: batchText })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Batch import failed')
+      showToast(data.message || `Provisioned ${data.created_count} users!`, 'success')
+      setBatchText('')
+      setShowBatchModal(false)
+      fetchUsers()
+    } catch (err: any) {
+      showToast(err.message || 'Error running batch import', 'error')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleDeleteUser = async (userId: number, userEmail: string) => {
+    if (!window.confirm(`Delete account ${userEmail}?`)) return
+    try {
+      const token = localStorage.getItem('auth_token')
+      const res = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Failed to delete user')
+      showToast(`Account ${userEmail} deleted`, 'success')
+      fetchUsers()
+    } catch (err: any) {
+      showToast(err.message || 'Error deleting user', 'error')
+    }
+  }
+
+  const handleToggleStatus = async (userId: number) => {
+    try {
+      const token = localStorage.getItem('auth_token')
+      const res = await fetch(`${API_BASE}/api/admin/users/${userId}/status`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Status toggle failed')
+      showToast(data.message, 'success')
+      fetchUsers()
+    } catch (err: any) {
+      showToast(err.message || 'Error updating status', 'error')
+    }
+  }
+
+  const loadSampleRoster = () => {
+    setBatchText(
+`faculty@cit.edu, Dr. Arvind Rao, FACULTY, Faculty@123, Computer Science & Engineering
+club@cit.edu, Aarav Mehta, CLUB_LEAD, Club@123, Student Activities Council
+student@cit.edu, Rohan Sharma, STUDENT, Student@123, Computer Science (Year 2)
+prof.sen@cit.edu, Dr. Sunita Sen, FACULTY, Faculty@123, CSE
+prof.patel@cit.edu, Dr. Meera Patel, FACULTY, Faculty@123, Mathematics`
+    )
+  }
+
+  const roleBadgeStyle = (r: string) => {
+    switch (r) {
+      case 'ADMIN': return 'bg-purple-500/10 text-purple-600 border-purple-500/20'
+      case 'FACULTY': return 'bg-sky-500/10 text-sky-600 border-sky-500/20'
+      case 'CLUB_LEAD': return 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+      default: return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="size-5 text-ev-mint" />
+            <h2 className="text-lg font-semibold text-foreground">Campus User & RBAC Management</h2>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Only authorized accounts added below can sign in to the platform. Prevents unauthorized signups.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowBatchModal(true)}
+            className="flex items-center gap-1.5 rounded-full border border-timetable-grid bg-card px-3.5 py-1.5 text-xs font-medium hover:bg-muted transition shadow-sm"
+          >
+            <UserPlus className="size-3.5" />
+            <span>Batch Import Users</span>
+          </button>
+          <button
+            onClick={fetchUsers}
+            disabled={loading}
+            className="flex items-center gap-1.5 rounded-full border border-timetable-grid bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted transition"
+            title="Refresh Roster"
+          >
+            <RefreshCw className={`size-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      {/* Add Single User Form */}
+      <Panel className="p-5">
+        <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+          <UserPlus className="size-4 text-muted-foreground" />
+          <span>Provision New Authorized Account</span>
+        </h3>
+        <form onSubmit={handleCreateUser} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div>
+            <label className="block text-[11px] font-medium text-muted-foreground mb-1">Email Address</label>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="e.g. prof.rao@cit.edu"
+              className="w-full rounded-md border border-timetable-grid bg-muted px-3 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-muted-foreground mb-1">Full Name</label>
+            <input
+              type="text"
+              required
+              value={fullName}
+              onChange={e => setFullName(e.target.value)}
+              placeholder="e.g. Dr. Arvind Rao"
+              className="w-full rounded-md border border-timetable-grid bg-muted px-3 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-muted-foreground mb-1">Assigned Role</label>
+            <select
+              value={role}
+              onChange={e => setRole(e.target.value)}
+              className="w-full rounded-md border border-timetable-grid bg-muted px-3 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="STUDENT">Student</option>
+              <option value="FACULTY">Faculty</option>
+              <option value="CLUB_LEAD">Club Representative</option>
+              <option value="ADMIN">Administrator</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-muted-foreground mb-1">Department</label>
+            <input
+              type="text"
+              value={department}
+              onChange={e => setDepartment(e.target.value)}
+              placeholder="e.g. CSE"
+              className="w-full rounded-md border border-timetable-grid bg-muted px-3 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <div className="flex items-end">
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full flex items-center justify-center gap-1.5 rounded-md bg-ink px-3 py-1.5 text-xs font-medium text-ink-foreground hover:opacity-90 transition disabled:opacity-50"
+            >
+              {submitting ? <Loader2 className="size-3.5 animate-spin" /> : <UserPlus className="size-3.5" />}
+              <span>Provision User</span>
+            </button>
+          </div>
+        </form>
+      </Panel>
+
+      {/* Batch Import Modal */}
+      {showBatchModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/30 backdrop-blur-xs p-4">
+          <div className="w-full max-w-xl rounded-2xl border border-timetable-grid bg-card p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-timetable-grid">
+              <div className="flex items-center gap-2">
+                <Users className="size-4 text-ev-mint" />
+                <h3 className="text-sm font-semibold text-foreground">Batch Import Campus Accounts</h3>
+              </div>
+              <button
+                onClick={() => setShowBatchModal(false)}
+                className="rounded-full p-1 text-muted-foreground hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="mt-4 space-y-3">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Paste comma-separated user rows below. Format:<br />
+                <code className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-foreground">email, full_name, role, password, department</code>
+              </p>
+              <textarea
+                value={batchText}
+                onChange={e => setBatchText(e.target.value)}
+                placeholder="prof.sharma@cit.edu, Prof. Sharma, FACULTY, Pass@123, CSE&#10;club.robotics@cit.edu, Robotics Lead, CLUB_LEAD, Club@123, SAC"
+                rows={7}
+                className="w-full rounded-lg border border-timetable-grid bg-muted p-3 text-xs font-mono text-foreground outline-none focus:ring-2 focus:ring-ring resize-none"
+              />
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  type="button"
+                  onClick={loadSampleRoster}
+                  className="text-xs text-ev-mint underline hover:opacity-80 font-medium"
+                >
+                  Load Sample Roster Template
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowBatchModal(false)}
+                    className="rounded-full border border-timetable-grid px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleBatchImport}
+                    disabled={submitting}
+                    className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-1.5 text-xs font-medium text-ink-foreground hover:opacity-90 disabled:opacity-50"
+                  >
+                    {submitting ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+                    <span>Import Accounts</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Users Roster Table */}
+      <Panel className="overflow-hidden">
+        <div className="flex items-center justify-between border-b border-timetable-grid p-4">
+          <div className="flex items-center gap-2">
+            <Users className="size-4 text-muted-foreground" />
+            <h3 className="text-sm font-semibold text-foreground">Provisioned Institutional Users</h3>
+          </div>
+          <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+            {users.length} {users.length === 1 ? 'account' : 'accounts'}
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-muted/50 border-b border-timetable-grid text-muted-foreground uppercase text-[10px] tracking-wider">
+              <tr>
+                <th className="py-2.5 px-4">User</th>
+                <th className="py-2.5 px-4">Role</th>
+                <th className="py-2.5 px-4">Department</th>
+                <th className="py-2.5 px-4">Status</th>
+                <th className="py-2.5 px-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-timetable-grid">
+              {users.map(u => (
+                <tr key={u.id} className="hover:bg-muted/30 transition">
+                  <td className="py-3 px-4">
+                    <div className="flex items-center gap-2.5">
+                      <div className="grid size-7 place-items-center rounded-full bg-secondary text-[11px] font-bold text-foreground">
+                        {u.full_name?.charAt(0) || 'U'}
+                      </div>
+                      <div>
+                        <div className="font-medium text-foreground">{u.full_name}</div>
+                        <div className="text-[11px] text-muted-foreground">{u.email}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-3 px-4">
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${roleBadgeStyle(u.role)}`}>
+                      {u.role}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4 text-muted-foreground">
+                    {u.department || 'General'}
+                  </td>
+                  <td className="py-3 px-4">
+                    <button
+                      onClick={() => handleToggleStatus(u.id)}
+                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition ${
+                        u.is_active
+                          ? 'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20'
+                          : 'bg-rose-500/10 text-rose-600 hover:bg-rose-500/20'
+                      }`}
+                      title="Click to toggle status"
+                    >
+                      <span className={`size-1.5 rounded-full ${u.is_active ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                      {u.is_active ? 'Active' : 'Inactive'}
+                    </button>
+                  </td>
+                  <td className="py-3 px-4 text-right">
+                    <button
+                      onClick={() => handleDeleteUser(u.id, u.email)}
+                      className="rounded p-1 text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 transition"
+                      title="Delete User"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {users.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={5} className="py-8 text-center text-muted-foreground">
+                    No users provisioned yet. Use the form above to add an authorized user.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  )
+}
+
 function AuthScreen({
   onLoginSuccess,
   dark,
@@ -1901,12 +2387,8 @@ function AuthScreen({
   dark: boolean
   setDark: React.Dispatch<React.SetStateAction<boolean>>
 }) {
-  const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [fullName, setFullName] = useState('')
-  const [selectedRole, setSelectedRole] = useState('STUDENT')
-  const [department, setDepartment] = useState('Computer Science')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -1937,46 +2419,20 @@ function AuthScreen({
     }
   }
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!email.trim() || !password.trim() || !fullName.trim()) {
-      setError('Please fill in all required fields.')
-      return
-    }
+  const fillAdmin = () => {
+    setEmail('admin@cit.edu')
+    setPassword('Admin@123')
     setError('')
-    setLoading(true)
-    try {
-      const res = await fetch(`${API_BASE}/api/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: email.trim(),
-          password,
-          full_name: fullName.trim(),
-          role: selectedRole,
-          department: department.trim()
-        })
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        throw new Error(data.detail || 'Registration failed.')
-      }
-      onLoginSuccess(data.access_token, data.user)
-    } catch (err: any) {
-      setError(err.message || 'Registration failed.')
-    } finally {
-      setLoading(false)
-    }
   }
 
   return (
     <main className="min-h-screen bg-canvas p-3 text-foreground lg:p-6 flex items-center justify-center">
-      <div className="w-full max-w-md rounded-md grad-shell p-3">
-        <div className="rounded-lg bg-card p-6 border border-timetable-grid">
+      <div className="w-full max-w-md rounded-2xl grad-shell p-3 shadow-2xl">
+        <div className="rounded-xl bg-card p-6 border border-timetable-grid">
           {/* Header */}
           <div className="flex items-center justify-between pb-5 border-b border-timetable-grid">
             <div className="flex items-center gap-3">
-              <div className="grid size-10 place-items-center rounded-lg bg-ink text-[11px] font-bold text-ink-foreground">
+              <div className="grid size-10 place-items-center rounded-lg bg-ink text-[11px] font-bold text-ink-foreground shadow-sm">
                 CIT
               </div>
               <div>
@@ -2001,192 +2457,97 @@ function AuthScreen({
             </button>
           </div>
 
-          {/* Mode Tabs */}
-          <div className="mt-6 flex items-center gap-2">
-            <Pill active={mode === 'login'} onClick={() => { setMode('login'); setError('') }}>
-              Sign In
-            </Pill>
-            <Pill active={mode === 'register'} onClick={() => { setMode('register'); setError('') }}>
-              Create Account
-            </Pill>
+          {/* Institutional Access Notice */}
+          <div className="mt-5 rounded-lg border border-purple-500/20 bg-purple-500/5 p-3 text-xs text-foreground/80 flex items-start gap-2.5">
+            <ShieldCheck className="size-4 text-purple-500 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-semibold text-foreground">Institutional Access Control:</span> Only authorized campus accounts provisioned by the Administrator can sign in.
+            </div>
           </div>
 
           {/* Error Banner */}
           {error && (
-            <div className="mt-4 flex items-center gap-2 rounded-none border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-600">
+            <div className="mt-4 flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-600">
               <AlertTriangle className="size-4 shrink-0" />
               <span>{error}</span>
             </div>
           )}
 
-          {mode === 'login' ? (
-            <form onSubmit={handleLogin} className="mt-5 space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1.5" htmlFor="login-email">
-                  Institutional Email
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
-                  <input
-                    id="login-email"
-                    type="email"
-                    required
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    placeholder="name@cit.edu"
-                    className="w-full rounded-md border border-timetable-grid bg-muted pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1.5" htmlFor="login-password">
-                  Password
-                </label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
-                  <input
-                    id="login-password"
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="Enter password"
-                    className="w-full rounded-md border border-timetable-grid bg-muted pl-9 pr-9 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(v => !v)}
-                    className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground"
-                    aria-label="Toggle password visibility"
-                  >
-                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full flex items-center justify-center gap-2 rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-ink-foreground hover:opacity-90 transition disabled:opacity-50"
-                >
-                  {loading ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
-                  Sign In
-                </button>
-              </div>
-            </form>
-          ) : (
-            <form onSubmit={handleRegister} className="mt-5 space-y-3.5">
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1.5" htmlFor="reg-name">
-                  Full Name
-                </label>
+          <form onSubmit={handleLogin} className="mt-5 space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-foreground mb-1.5" htmlFor="login-email">
+                Institutional Email
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
                 <input
-                  id="reg-name"
-                  type="text"
+                  id="login-email"
+                  type="email"
                   required
-                  value={fullName}
-                  onChange={e => setFullName(e.target.value)}
-                  placeholder="e.g. Dr. Priyadarshi Dash"
-                  className="w-full rounded-md border border-timetable-grid bg-muted px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="name@cit.edu"
+                  className="w-full rounded-md border border-timetable-grid bg-muted pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
+            </div>
 
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1.5" htmlFor="reg-email">
-                  Institutional Email
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
-                  <input
-                    id="reg-email"
-                    type="email"
-                    required
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    placeholder="name@cit.edu"
-                    className="w-full rounded-md border border-timetable-grid bg-muted pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1.5" htmlFor="reg-password">
-                  Password
-                </label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
-                  <input
-                    id="reg-password"
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="At least 6 characters"
-                    className="w-full rounded-md border border-timetable-grid bg-muted pl-9 pr-9 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(v => !v)}
-                    className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground"
-                    aria-label="Toggle password visibility"
-                  >
-                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-foreground mb-1.5" htmlFor="reg-role">
-                    Role
-                  </label>
-                  <select
-                    id="reg-role"
-                    value={selectedRole}
-                    onChange={e => setSelectedRole(e.target.value)}
-                    className="w-full rounded-md border border-timetable-grid bg-muted px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="STUDENT">Student</option>
-                    <option value="FACULTY">Faculty</option>
-                    <option value="CLUB_LEAD">Club Representative</option>
-                    <option value="ADMIN">Administrator</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-foreground mb-1.5" htmlFor="reg-dept">
-                    Department
-                  </label>
-                  <input
-                    id="reg-dept"
-                    type="text"
-                    required
-                    value={department}
-                    onChange={e => setDepartment(e.target.value)}
-                    placeholder="e.g. CSE"
-                    className="w-full rounded-md border border-timetable-grid bg-muted px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-2">
+            <div>
+              <label className="block text-xs font-medium text-foreground mb-1.5" htmlFor="login-password">
+                Password
+              </label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+                <input
+                  id="login-password"
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="Enter password"
+                  className="w-full rounded-md border border-timetable-grid bg-muted pl-9 pr-9 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+                />
                 <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full flex items-center justify-center gap-2 rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-ink-foreground hover:opacity-90 transition disabled:opacity-50"
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground"
+                  aria-label="Toggle password visibility"
                 >
-                  {loading ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" />}
-                  Create Account
+                  {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                 </button>
               </div>
-            </form>
-          )}
+            </div>
 
-          <div className="mt-6 pt-4 border-t border-timetable-grid flex items-center justify-between text-[11px] text-muted-foreground">
+            <div className="pt-2">
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-2 rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-ink-foreground hover:opacity-90 transition disabled:opacity-50 shadow-sm"
+              >
+                {loading ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+                Sign In
+              </button>
+            </div>
+          </form>
+
+          {/* Quick Demo Credentials Helper */}
+          <div className="mt-5 pt-4 border-t border-timetable-grid">
+            <button
+              type="button"
+              onClick={fillAdmin}
+              className="w-full flex items-center justify-between rounded-lg border border-timetable-grid bg-muted/60 p-2.5 text-xs text-foreground/80 hover:bg-muted transition"
+            >
+              <span className="flex items-center gap-1.5">
+                <Sparkles className="size-3.5 text-ev-mint" />
+                <span>Fill Default Admin (admin@cit.edu)</span>
+              </span>
+              <span className="text-[11px] font-mono text-muted-foreground">Admin@123</span>
+            </button>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between text-[11px] text-muted-foreground">
             <span>Secure Institutional RBAC & JWT</span>
-            <span>Semester 2027</span>
+            <span>CIT Campus Ops</span>
           </div>
         </div>
       </div>

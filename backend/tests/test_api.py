@@ -1,0 +1,154 @@
+import os
+import pytest
+from fastapi.testclient import TestClient
+
+# Set clean test environment
+os.environ["DATABASE_URL"] = "sqlite:///./test_campus.db"
+os.environ["JWT_SECRET_KEY"] = "test-secret-key-32-chars-long-abcde"
+
+from backend.app.main import app
+from backend.app.db.session import engine, Base
+from backend.app.db.seed import init_db
+
+client = TestClient(app)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def setup_db():
+    init_db()
+    yield
+    # Cleanup test db
+    if os.path.exists("test_campus.db"):
+        try:
+            os.remove("test_campus.db")
+        except Exception:
+            pass
+
+
+def get_admin_token():
+    res = client.post("/api/auth/login", json={"email": "admin@cit.edu", "password": "Admin@123"})
+    assert res.status_code == 200, res.text
+    return res.json()["access_token"]
+
+
+def test_root_and_metadata():
+    res = client.get("/")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "online"
+
+    meta_res = client.get("/api/meta")
+    assert meta_res.status_code == 200
+    assert "days" in meta_res.json()
+
+
+def test_prevent_public_registration():
+    """Verify that random external visitors cannot self-register."""
+    res = client.post("/api/auth/register", json={
+        "email": "rando@gmail.com",
+        "password": "Password123",
+        "full_name": "Random Visitor",
+        "role": "ADMIN"
+    })
+    assert res.status_code == 403
+    assert "Public self-registration is disabled" in res.json()["detail"]
+
+
+def test_prevent_unprovisioned_login():
+    """Verify that uninvited/unprovisioned users cannot sign in."""
+    res = client.post("/api/auth/login", json={
+        "email": "nobody@cit.edu",
+        "password": "AnyPassword"
+    })
+    assert res.status_code == 401
+
+
+def test_admin_login():
+    token = get_admin_token()
+    assert token is not None
+
+    me_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me_res.status_code == 200
+    assert me_res.json()["role"] == "ADMIN"
+
+
+def test_admin_user_management():
+    token = get_admin_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    import uuid
+    uid = uuid.uuid4().hex[:6]
+
+    # 1. List users
+    list_res = client.get("/api/admin/users", headers=headers)
+    assert list_res.status_code == 200
+    initial_count = len(list_res.json())
+
+    # 2. Add single user
+    test_email = f"prof.{uid}@cit.edu"
+    new_user_payload = {
+        "email": test_email,
+        "full_name": "Prof. Sharma",
+        "role": "FACULTY",
+        "department": "CSE",
+        "password": "Faculty@123"
+    }
+    create_res = client.post("/api/admin/users", json=new_user_payload, headers=headers)
+    assert create_res.status_code == 201
+    created_id = create_res.json()["id"]
+
+    # 3. Batch add users
+    batch_dance_email = f"club.dance.{uid}@cit.edu"
+    batch_student_email = f"student.y2.{uid}@cit.edu"
+    batch_payload = {
+        "raw_text": f"""
+# Campus Test Users
+{batch_dance_email}, Dance Society Lead, CLUB_LEAD, Club@123, Student Council
+{batch_student_email}, Rahul Verma, STUDENT, Student@123, CSE
+"""
+    }
+    batch_res = client.post("/api/admin/users/batch", json=batch_payload, headers=headers)
+    assert batch_res.status_code == 200
+    assert batch_res.json()["created_count"] == 2
+
+    # 4. Verify new users can now log in
+    dance_res = client.post("/api/auth/login", json={"email": batch_dance_email, "password": "Club@123"})
+    assert dance_res.status_code == 200
+    assert dance_res.json()["user"]["role"] == "CLUB_LEAD"
+
+    # 5. Non-admin forbidden from user management
+    student_token = dance_res.json()["access_token"]
+    forbidden_res = client.get("/api/admin/users", headers={"Authorization": f"Bearer {student_token}"})
+    assert forbidden_res.status_code == 403
+
+    # 6. Delete user
+    del_res = client.delete(f"/api/admin/users/{created_id}", headers=headers)
+    assert del_res.status_code == 200
+
+
+def test_restore_and_clear_data():
+    token = get_admin_token()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Restore baseline
+    res = client.post("/api/admin/restore-baseline", headers=headers)
+    assert res.status_code == 200
+
+    # Schedule should have sessions
+    sched_res = client.get("/api/schedule")
+    assert sched_res.status_code == 200
+    assert sched_res.json()["count"] > 0
+
+    # Export schedule
+    export_res = client.get("/api/export/schedule")
+    assert export_res.status_code == 200
+    assert "attachment; filename=\"schedule.json\"" in export_res.headers.get("content-disposition", "")
+    assert "sessions" in export_res.json()
+
+    # Clear data
+    clear_res = client.post("/api/admin/clear-data", headers=headers)
+    assert clear_res.status_code == 200
+
+    # Schedule should now be empty
+    empty_sched_res = client.get("/api/schedule")
+    assert empty_sched_res.status_code == 200
+    assert empty_sched_res.json()["count"] == 0

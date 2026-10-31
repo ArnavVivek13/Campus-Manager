@@ -57,45 +57,14 @@ class TokenResponse(BaseModel):
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 def register(req: RegisterRequest, db: Session = Depends(get_db)):
-    """Registers a new campus user with a hashed password and role assignment."""
-    existing = db.query(User).filter(User.email == req.email.lower()).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A user with this email address already exists"
-        )
-    
-    user = User(
-        email=req.email.lower(),
-        hashed_password=hash_password(req.password),
-        full_name=req.full_name,
-        role=req.role or RoleEnum.STUDENT,
-        department=req.department or "General Academics",
-        is_active=True,
-        oauth_provider="local"
+    """
+    Public self-registration is disabled to prevent unauthorized account creation.
+    Institutional accounts must be provisioned by the Administrator via User Management.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Public self-registration is disabled. Institutional accounts must be provisioned by the Administrator."
     )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    token_payload = {"sub": str(user.id), "email": user.email, "role": user.role.value}
-    access_token = create_access_token(token_payload)
-    refresh_token = create_refresh_token(token_payload)
-
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "full_name": user.full_name,
-            "role": user.role.value,
-            "department": user.department,
-            "oauth_provider": user.oauth_provider,
-            "permissions": get_permissions_for_role(user.role),
-        }
-    }
 
 @router.post("/login", response_model=TokenResponse)
 def login(req: LoginRequest, db: Session = Depends(get_db)):
@@ -212,17 +181,10 @@ def demo_role_login(req: DemoLoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == target_email).first()
     
     if not user:
-        user = User(
-            email=target_email,
-            full_name=f"CIT {req.role.value.replace('_', ' ').title()}",
-            role=req.role,
-            department="Academic Operations",
-            is_active=True,
-            oauth_provider="demo-sso"
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Account '{target_email}' has not been provisioned by the Administrator. Please log in as Admin to provision user roles."
         )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
 
     token_payload = {"sub": str(user.id), "email": user.email, "role": user.role.value}
     access_token = create_access_token(token_payload)

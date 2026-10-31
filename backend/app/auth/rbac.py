@@ -109,11 +109,21 @@ def get_current_user(
 
 def require_role(*allowed_roles: RoleEnum):
     """Enforces that the authenticated user belongs to one of the specified roles."""
+    roles = []
+    for r in allowed_roles:
+        if isinstance(r, (list, tuple, set)):
+            roles.extend(r)
+        else:
+            roles.append(r)
+
     def role_checker(current_user: User = Depends(get_current_user)) -> User:
-        if current_user.role not in allowed_roles:
+        user_role = current_user.role
+        role_vals = [getattr(x, "value", str(x)) for x in roles]
+        user_val = getattr(user_role, "value", str(user_role))
+        if user_role not in roles and user_val not in role_vals:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access denied: Required role '{[r.value for r in allowed_roles]}', your role is '{current_user.role.value}'"
+                detail=f"Access denied: Required role '{role_vals}', your role is '{user_val}'"
             )
         return current_user
     return role_checker

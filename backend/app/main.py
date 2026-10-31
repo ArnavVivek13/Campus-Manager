@@ -31,9 +31,10 @@ from backend.app.db.session import get_db
 from backend.app.db.models import (
     User, Room, Faculty, StudentGroup, SessionModel, ExamModel, BookingModel, DisruptionLog, RoleEnum
 )
-from backend.app.db.seed import init_db
+from backend.app.db.seed import init_db, seed_baseline_records, clear_db_data
 from backend.app.auth.rbac import get_current_user, require_role, require_permission, PermissionEnum
 from backend.app.api.auth_routes import router as auth_router
+from backend.app.api.user_routes import router as user_router
 from sqlalchemy.orm import Session
 
 app = FastAPI(
@@ -50,14 +51,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register Authentication & OAuth Router
+# Register Authentication & User Management Routers
 app.include_router(auth_router)
+app.include_router(user_router)
 
-# Initialize DBMS tables and seed baseline records
+# Initialize DBMS tables (only seeds Admin if empty; keeps operational data empty)
 init_db()
 
 DATA_PATH = "CrunchWeek_StarterPack/data/cit_public.json"
 SCHEDULE_PATH = "exports/schedule.json"
+SCHEDULE_BASELINE_PATH = "exports/schedule.baseline.json"
 SCHEDULE_AFTER_PATH = "exports/schedule_after.json"
 SAMPLE_DISRUPTION_PATH = "CrunchWeek_StarterPack/examples/sample_disruption.json"
 
@@ -74,17 +77,49 @@ STATE = {
 }
 
 
+def get_empty_schedule(dataset_id="empty"):
+    return {
+        "team": "Zephyr",
+        "dataset_id": dataset_id,
+        "sessions": [],
+        "fest_week": {
+            "bookings": [],
+            "session_overrides": []
+        },
+        "exams": []
+    }
+
+
+def set_empty_state():
+    STATE["data"] = None
+    STATE["baseline_data"] = None
+    empty_sched = get_empty_schedule()
+    STATE["schedule"] = copy.deepcopy(empty_sched)
+    STATE["baseline_schedule"] = copy.deepcopy(empty_sched)
+    STATE["schedule_after"] = {"sessions": []}
+    STATE["disruption_pending"] = None
+    STATE["disruption_diff"] = None
+    STATE["active_view"] = "baseline"
+
+
 def load_initial_state():
     with open(DATA_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    with open(SCHEDULE_PATH, "r", encoding="utf-8") as f:
+    source_path = SCHEDULE_BASELINE_PATH if os.path.exists(SCHEDULE_BASELINE_PATH) else SCHEDULE_PATH
+    with open(source_path, "r", encoding="utf-8") as f:
         sched = json.load(f)
 
     STATE["data"] = copy.deepcopy(data)
     STATE["baseline_data"] = copy.deepcopy(data)
     STATE["schedule"] = copy.deepcopy(sched)
     STATE["baseline_schedule"] = copy.deepcopy(sched)
+
+    try:
+        with open(SCHEDULE_PATH, "w", encoding="utf-8") as f:
+            json.dump(sched, f, indent=2)
+    except Exception:
+        pass
 
     if os.path.exists(SCHEDULE_AFTER_PATH):
         with open(SCHEDULE_AFTER_PATH, "r", encoding="utf-8") as f:
@@ -95,8 +130,8 @@ def load_initial_state():
     STATE["active_view"] = "baseline"
 
 
-# Initialize on startup
-load_initial_state()
+# Initialize on startup with empty data (Admin loads or restores baseline)
+set_empty_state()
 
 
 # --- Models ---
@@ -138,10 +173,12 @@ class DisruptionDecisionPayload(BaseModel):
 
 @app.get("/")
 def read_root():
+    d = STATE.get("data")
+    dataset_id = d.get("dataset_id", "empty") if d else "empty"
     return {
         "status": "online",
         "service": "CIT Campus Scheduling API",
-        "dataset_id": STATE["data"]["dataset_id"],
+        "dataset_id": dataset_id,
         "active_view": STATE["active_view"]
     }
 
@@ -149,7 +186,17 @@ def read_root():
 @app.get("/api/meta")
 def get_metadata():
     """Returns lists of student groups, faculty, rooms, and courses for frontend dropdowns."""
-    d = STATE["data"]
+    d = STATE.get("data")
+    if not d:
+        return {
+            "days": ["MON", "TUE", "WED", "THU", "FRI"],
+            "periods": [1, 2, 3, 4, 5, 6, 7, 8],
+            "groups": [],
+            "faculty": [],
+            "rooms": [],
+            "courses": [],
+            "active_view": STATE.get("active_view", "baseline")
+        }
     return {
         "days": d["calendar"]["days"],
         "periods": d["calendar"]["periods"],
@@ -170,7 +217,11 @@ def get_schedule(
 ):
     """Returns timetable sessions filtered by group, faculty, or room."""
     target_sched = STATE["schedule_after"] if (view == "after_disruption" or STATE["active_view"] == "after_disruption") and STATE["schedule_after"] else STATE["schedule"]
-    sessions_data = {s["id"]: s for s in STATE["data"]["sessions"]}
+    
+    if not STATE.get("data") or not target_sched:
+        return {"count": 0, "sessions": [], "active_view": STATE.get("active_view", "baseline")}
+
+    sessions_data = {s["id"]: s for s in STATE["data"].get("sessions", [])}
     courses_data = {c["id"]: c for c in STATE["data"].get("courses", [])}
 
     results = []
@@ -207,7 +258,9 @@ def get_schedule(
 @app.get("/api/exams")
 def get_exams():
     """Returns Midsem exam schedule."""
-    sched = STATE["schedule"]
+    sched = STATE.get("schedule")
+    if not sched or not STATE.get("data"):
+        return {"exams": []}
     ex_meta = {e["id"]: e for e in STATE["data"].get("exams", [])}
     exams_out = []
     for item in sched.get("exams", []):
@@ -225,7 +278,9 @@ def get_exams():
 @app.get("/api/fest/bookings")
 def get_fest_bookings():
     """Returns Spectra week booking requests and decisions."""
-    sched = STATE["schedule"]
+    sched = STATE.get("schedule")
+    if not sched or not STATE.get("data"):
+        return {"bookings": [], "session_overrides": []}
     requests = STATE["data"].get("booking_requests", [])
     req_map = {r["id"]: r for r in requests}
     cancellations = {c["request_id"] for c in STATE["data"].get("cancellations", [])}
@@ -257,13 +312,20 @@ def get_fest_bookings():
 @app.post("/api/ai/parse-booking")
 def parse_booking_endpoint(req: ParseRequest):
     """Translates English/Hinglish text to a structured booking proposal."""
-    parsed = parse_booking_prompt(req.text, STATE["data"]["rooms"])
+    rooms = STATE["data"]["rooms"] if STATE.get("data") and "rooms" in STATE["data"] else [
+        {"id": "LH-1", "capacity": 120}, {"id": "LH-2", "capacity": 90}, {"id": "AUD", "capacity": 420},
+        {"id": "AMPH", "capacity": 500}, {"id": "LAB-1", "capacity": 60}, {"id": "SEM-HALL", "capacity": 120}
+    ]
+    parsed = parse_booking_prompt(req.text, rooms)
     return parsed
 
 
 @app.post("/api/ai/explain")
 def explain_endpoint(req: ExplainRequest):
     """Provides rational natural language explanation for why a session was scheduled or a booking rejected."""
+    if not STATE.get("data") or not STATE.get("schedule"):
+        return {"explanation": "No dataset is currently loaded. Please load or restore the baseline dataset first."}
+
     if req.query_type == "session":
         exp = explain_session_placement(req.item_id, STATE["data"], STATE["schedule"])
     elif req.query_type == "booking":
@@ -485,59 +547,36 @@ def revert_disruption(db: Session = Depends(get_db)):
 def clear_all_data(db: Session = Depends(get_db)):
     """
     Clears all current data from all SQL database tables and in-memory schedule tables.
+    Leaves user accounts intact but resets timetable, sessions, exams, bookings, rooms, groups.
     """
-    # 1. Clear database records
-    try:
-        db.query(BookingModel).delete()
-        db.query(DisruptionLog).delete()
-        db.query(SessionModel).delete()
-        db.query(ExamModel).delete()
-        db.commit()
-    except Exception:
-        db.rollback()
-
-    # 2. Clear in-memory schedule tables
-    dataset_id = STATE.get("data", {}).get("dataset_id", "cleared") if STATE.get("data") else "cleared"
-    empty_schedule = {
-        "team": "Zephyr",
-        "dataset_id": dataset_id,
-        "sessions": [],
-        "fest_week": {
-            "bookings": [],
-            "session_overrides": []
-        },
-        "exams": []
-    }
-    STATE["schedule"] = empty_schedule
-    STATE["schedule_after"] = {"sessions": []}
-    STATE["disruption_pending"] = None
-    STATE["disruption_diff"] = []
-    STATE["active_view"] = "baseline"
+    clear_db_data(db)
+    set_empty_state()
 
     # Persist empty export
     try:
         with open(SCHEDULE_PATH, "w", encoding="utf-8") as f:
-            json.dump(empty_schedule, f, indent=2)
+            json.dump(STATE["schedule"], f, indent=2)
     except Exception:
         pass
 
     return {
         "status": "success",
-        "message": "All current data has been successfully cleared from all tables."
+        "message": "All current timetable, booking, exam, and operational data has been successfully cleared."
     }
 
 
 @app.post("/api/admin/reset")
 @app.post("/api/admin/restore-baseline")
-def reset_demo_data():
+def reset_demo_data(db: Session = Depends(get_db)):
     """
-    CRITICAL JUDGE REQUIREMENT:
-    Restores the dataset and timetable to clean initial state.
+    Restores the starter pack dataset and solves baseline schedule.
+    Also populates SQL DBMS baseline records.
     """
     load_initial_state()
+    seed_baseline_records(db)
     return {
         "status": "success",
-        "message": "Baseline dataset and timetable states have been restored."
+        "message": "Baseline dataset, operational records, and timetable states have been restored."
     }
 
 
