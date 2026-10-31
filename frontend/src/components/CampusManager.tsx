@@ -127,8 +127,8 @@ export default function CampusManager() {
 
     {selected && <aside className="fixed inset-y-0 right-0 z-20 w-full max-w-md border-l border-timetable-grid bg-card p-6 shadow-2xl">
       <div className="flex items-start justify-between"><div><p className="text-xs text-muted-foreground">{selected.kicker}</p><h3 className="mt-1 text-xl font-semibold">{selected.title}</h3></div><button onClick={() => setSelected(null)} className="rounded-full p-2 hover:bg-accent" aria-label="Close"><X className="size-4" /></button></div>
-      <div className={`mt-5 rounded-none p-4 ${selected.hueCls}`}><p className="text-sm font-medium">{selected.line1}</p><p className="mt-1 text-sm opacity-80">{selected.line2}</p></div>
-      <div className="mt-4 grid grid-cols-2 gap-3">{selected.fields.map(([l, v]) => <div key={l} className="rounded-none bg-muted p-3"><p className="text-[11px] text-muted-foreground">{l}</p><p className="mt-1 text-sm font-medium">{v}</p></div>)}</div>
+      <div className={`mt-5 rounded-none border border-timetable-grid p-4 ${selected.hueCls}`}><p className="text-sm font-medium">{selected.line1}</p><p className="mt-1 text-sm opacity-80">{selected.line2}</p></div>
+      <div className="mt-4 grid grid-cols-2 gap-3">{selected.fields.map(([l, v]) => <div key={l} className="rounded-none border border-timetable-grid bg-muted p-3"><p className="text-[11px] text-muted-foreground">{l}</p><p className="mt-1 text-sm font-medium">{v}</p></div>)}</div>
       <div className="mt-4 rounded-lg border border-timetable-grid p-4 text-sm leading-6 text-muted-foreground"><Sparkles className="mb-2 size-4 text-foreground" />{selected.note}</div>
       <button className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 text-sm font-medium text-ink-foreground hover:opacity-90"><Bot className="size-4" />Ask AI: Why is this class placed here?</button>
     </aside>}
@@ -173,7 +173,7 @@ function Timetable({ onSelect }: { onSelect: (s: Session) => void }) {
         <div className="border-r border-timetable-grid grid-hours">{hours.map(h => <div key={h} className="pt-2 text-sm text-foreground/80 pr-2 text-right" style={{ height: HOUR_PX }}>{fmt(h)}</div>)}</div>
         {days.map((d, di) => <div key={d} className="relative border-r border-timetable-grid last:border-r-0 grid-hours">
           {!list.some(s => s.day === di && s.start < 14 && s.end > 13) && <div className="absolute inset-x-0 bg-warning-soft/60 px-2 py-1 text-[10px] text-warning" style={{ top: (13 - HOUR_START) * HOUR_PX, height: HOUR_PX }}>Lunch break</div>}
-          {list.filter(s => s.day === di).map(s => <button key={s.id} onClick={() => onSelect(s)} className={`absolute inset-x-0 flex flex-col justify-center rounded-none p-2.5 text-left transition hover:-translate-y-0.5 hover:shadow-md ${hue[catHue[s.cat] ?? 'violet']}`} style={{ top: (s.start - HOUR_START) * HOUR_PX, height: (s.end - s.start) * HOUR_PX }}>
+          {list.filter(s => s.day === di).map(s => <button key={s.id} onClick={() => onSelect(s)} className={`absolute inset-x-0 flex flex-col justify-center rounded-none border border-timetable-grid p-2.5 text-left transition hover:-translate-y-0.5 hover:shadow-md ${hue[catHue[s.cat] ?? 'violet']}`} style={{ top: (s.start - HOUR_START) * HOUR_PX, height: (s.end - s.start) * HOUR_PX }}>
             <div className="flex items-start justify-between gap-2"><span className="truncate text-[13px] font-medium leading-tight">{s.name}</span><MoreHorizontal className="size-3.5 shrink-0" /></div>
             <span className="mt-0.5 text-[11px] leading-tight opacity-75">{fmt(s.start)} – {fmt(s.end)}</span>
             <span className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] leading-tight opacity-75"><span className="flex items-center gap-1"><DoorOpen className="size-3" />{s.room}</span><span className="flex items-center gap-1"><Users className="size-3" />{s.faculty}</span></span>
@@ -192,8 +192,8 @@ function Fest({ rows, filter, setFilter, onSelect }: { rows: string[][]; filter:
   const stats: [string, string, Hue][] = [['64.5/70', 'Booking score', 'violet'], ['21', 'Approved', 'mint'], ['2', 'Alternatives offered', 'peach'], ['2', 'Rejected', 'rose'], ['0', 'Inversions', 'sky']]
   return <div>
     <Heading title="Spectra Fest · Week 7">{['All', 'Approved', 'Alternative Offered', 'Rejected'].map(f => <Pill key={f} active={filter === f} onClick={() => setFilter(f)}>{f}</Pill>)}</Heading>
-    <div className="grid gap-3 sm:grid-cols-5">{stats.map(([v, l, h]) => <div key={l} className={`rounded-none p-4 ${hue[h]}`}><p className="text-2xl font-semibold tracking-tight">{v}</p><p className="mt-1 text-xs opacity-80">{l}</p></div>)}</div>
-    <div className="mt-5 grid gap-3 md:grid-cols-2">{rows.map(r => <button key={r[0]} onClick={() => onSelect(r)} className={`flex flex-col justify-center rounded-none p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md ${hue[r[5] === 'Approved' ? 'mint' : r[5] === 'Rejected' ? 'rose' : 'peach']}`}>
+    <div className="grid gap-3 sm:grid-cols-5">{stats.map(([v, l, h]) => <div key={l} className={`rounded-none border border-timetable-grid p-4 ${hue[h]}`}><p className="text-2xl font-semibold tracking-tight">{v}</p><p className="mt-1 text-xs opacity-80">{l}</p></div>)}</div>
+    <div className="mt-5 grid gap-3 md:grid-cols-2">{rows.map(r => <button key={r[0]} onClick={() => onSelect(r)} className={`flex flex-col justify-center rounded-none border border-timetable-grid p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md ${hue[r[5] === 'Approved' ? 'mint' : r[5] === 'Rejected' ? 'rose' : 'peach']}`}>
       <div className="flex items-start justify-between"><div><p className="text-[13px] font-medium leading-tight">{r[1]}</p><p className="mt-0.5 text-[11px] opacity-75">{r[3]}</p></div><MoreHorizontal className="size-3.5" /></div>
       <p className="mt-3 text-[11px] opacity-75">{r[0]} · {r[2]}</p>
       <p className="mt-1 flex items-center gap-1 text-[11px] opacity-75"><DoorOpen className="size-3" />{r[4]}</p>
@@ -211,7 +211,7 @@ function ExamGrid({ onSelect }: { onSelect: (e: string[]) => void }) {
       <div className="border-b border-r border-timetable-grid" />{['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map((d, i) => <div key={d} className="border-b border-r border-timetable-grid py-1.5 text-center text-sm text-foreground/80 last:border-r-0">{14 + i} - {d.charAt(0) + d.slice(1).toLowerCase()}</div>)}
       {['AM', 'PM'].map(slot => <React.Fragment key={slot}>
         <div className="border-b border-r border-timetable-grid pt-3 text-sm text-foreground/80 pr-2 text-right">{slot === 'AM' ? '09:30' : '14:00'}<p className="text-[11px] text-muted-foreground">{slot === 'AM' ? 'to 11:30' : 'to 16:00'}</p></div>
-        {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(d => { const e = list.find(x => x[0] === d && x[1] === slot); return <div key={d} className="min-h-[170px] border-b border-r border-timetable-grid last:border-r-0">{e && <button onClick={() => onSelect(e)} className={`flex h-full w-full flex-col justify-center rounded-none p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md ${hue[slot === 'AM' ? 'sky' : 'violet']}`}>
+        {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(d => { const e = list.find(x => x[0] === d && x[1] === slot); return <div key={d} className="min-h-[170px] border-b border-r border-timetable-grid last:border-r-0">{e && <button onClick={() => onSelect(e)} className={`flex h-full w-full flex-col justify-center rounded-none border border-timetable-grid p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md ${hue[slot === 'AM' ? 'sky' : 'violet']}`}>
           <div className="flex items-start justify-between"><span className="text-[13px] font-medium leading-tight">{e[3]}</span><MoreHorizontal className="size-3.5 shrink-0" /></div>
           <span className="text-[11px] opacity-75">{e[2]}</span>
           <span className="mt-2 text-[10px] opacity-75">{e[4]}</span>
@@ -227,18 +227,18 @@ function Disruption({ preview, setPreview, setNotice }: { preview: boolean; setP
   const moves = [['SES-04', 'CS204 · Data Structures Lab', 'Mon 12:00–15:00 · LAB-1', 'Mon 12:00–15:00 · LAB-2'], ['SES-05', 'CS207 · AI Fundamentals', 'Tue 09:00 · LAB-1', 'Tue 09:00 · LAB-2'], ['SES-06', 'ME201 · Manufacturing Lab', 'Tue 09:00 · LAB-1', 'Tue 09:00 · LAB-3']]
   return <div>
     <Heading title="Disruption Studio"><Pill active={!preview} onClick={() => setPreview(false)}>Simulation</Pill><Pill active={preview} onClick={() => setPreview(true)}>Preview diff</Pill></Heading>
-    <div className={`flex flex-wrap items-center justify-between gap-4 rounded-none p-5 ${hue.periwinkle}`}>
+    <div className={`flex flex-wrap items-center justify-between gap-4 rounded-none border border-timetable-grid p-5 ${hue.periwinkle}`}>
       <div><p className="text-sm font-medium">Simulate or apply campus disruptions</p><p className="mt-1 text-[13px] opacity-75">Faculty leave, room closure, and extra sessions. Active closure: LAB-1.</p></div>
       <button onClick={() => setPreview(true)} className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground"><GitCompareArrows className="size-4" />Preview disruption diff</button>
     </div>
     {preview ? <>
       <div className="mt-5 flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-secondary px-3 py-1.5">3 sessions moved</span><span className="rounded-full bg-secondary px-3 py-1.5">0 time changes</span><span className="rounded-full bg-secondary px-3 py-1.5">3 room-only</span></div>
-      <div className="mt-4 grid gap-3 md:grid-cols-3">{moves.map(m => <div key={m[0]} className={`rounded-none p-4 ${hue.sky}`}>
+      <div className="mt-4 grid gap-3 md:grid-cols-3">{moves.map(m => <div key={m[0]} className={`rounded-none border border-timetable-grid p-4 ${hue.sky}`}>
         <div className="flex items-start justify-between"><p className="text-sm font-medium">{m[1]}</p><MoreHorizontal className="size-4 shrink-0" /></div>
         <p className="mt-3 text-xs line-through opacity-60">{m[2]}</p><p className="mt-1 text-[13px]">{m[3]}</p>
         <span className="mt-4 inline-flex items-center gap-1 text-[11px] font-medium opacity-80"><GitCompareArrows className="size-3" />Room reassigned</span>
       </div>)}</div>
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-none bg-warning-soft p-4"><div className="flex items-start gap-2 text-[13px] text-warning"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><span>All proposed room moves preserve capacity and equipment requirements.</span></div><button onClick={() => setNotice('Schedule changes approved and committed.')} className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground">Approve & commit</button></div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-none border border-timetable-grid bg-warning-soft p-4"><div className="flex items-start gap-2 text-[13px] text-warning"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><span>All proposed room moves preserve capacity and equipment requirements.</span></div><button onClick={() => setNotice('Schedule changes approved and committed.')} className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground">Approve & commit</button></div>
     </> : <div className="mt-5 grid min-h-56 place-items-center rounded-none border border-dashed border-timetable-grid text-center"><div><SlidersHorizontal className="mx-auto size-6 text-muted-foreground" /><p className="mt-3 text-sm font-medium">Simulation is ready</p><p className="mt-1 text-xs text-muted-foreground">Preview the diff before committing any changes.</p></div></div>}
   </div>
 }
@@ -262,7 +262,7 @@ function Assistant({ bookingText, setBookingText, parsed, submitBooking }: { boo
         </div>
       </Panel>
       <div className="flex flex-col gap-4">
-        <Panel className="p-5"><div className="flex items-center gap-2 text-sm font-medium"><MessageSquareText className="size-4" />Recent requests</div><div className="mt-4 flex flex-col gap-2">{([['Seminar Hall · tomorrow 18:00', 'mint'], ['Auditorium · Fri 09:00', 'peach'], ['LH-2 · next Monday', 'sky']] as [string, Hue][]).map(([t, h]) => <div key={t} className={`rounded-none p-3 ${hue[h]}`}><p className="text-[13px] font-medium">{t}</p><p className="mt-0.5 text-[11px] opacity-75">Awaiting approval</p></div>)}</div></Panel>
+        <Panel className="p-5"><div className="flex items-center gap-2 text-sm font-medium"><MessageSquareText className="size-4" />Recent requests</div><div className="mt-4 flex flex-col gap-2">{([['Seminar Hall · tomorrow 18:00', 'mint'], ['Auditorium · Fri 09:00', 'peach'], ['LH-2 · next Monday', 'sky']] as [string, Hue][]).map(([t, h]) => <div key={t} className={`rounded-none border border-timetable-grid p-3 ${hue[h]}`}><p className="text-[13px] font-medium">{t}</p><p className="mt-0.5 text-[11px] opacity-75">Awaiting approval</p></div>)}</div></Panel>
         <Panel className="p-5"><div className="flex items-center gap-2 text-sm font-medium"><Pencil className="size-4" />Available venues</div><div className="mt-4 flex flex-col gap-2 text-[13px]">{[['AUD', '420 seats', 'Available'], ['SEM-HALL', '120 seats', 'Available'], ['LH-1', '90 seats', 'Booked 18:00']].map(v => <div key={v[0]} className="flex items-center justify-between rounded-md bg-muted px-3 py-2"><span><b className="font-medium">{v[0]}</b><span className="ml-2 text-muted-foreground">{v[1]}</span></span><span className={`rounded-full px-2 py-0.5 text-[11px] ${v[2] === 'Available' ? 'bg-success-soft text-success' : 'bg-warning-soft text-warning'}`}>{v[2]}</span></div>)}</div></Panel>
       </div>
     </div>
