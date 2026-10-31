@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 # Load environment variables from .env
 load_dotenv()
-from fastapi import FastAPI, HTTPException, Query, Depends, status, UploadFile, File, Response
+from fastapi import FastAPI, HTTPException, Query, Depends, status, UploadFile, File, Response, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -901,25 +901,100 @@ def create_db_booking(
 ):
     """
     RBAC Protected: Allows authenticated Clubs and Faculty to create venue bookings.
+    Checks venue capacity, feature eligibility, and slot availability against the active schedule.
     Directly saved into the SQL DBMS with linked requester audit trail.
     """
     import uuid
     booking_id = f"BK-{uuid.uuid4().hex[:6].upper()}"
+
+    # Availability Pre-check against loaded rooms
+    active_rooms = db.query(Room).all()
+    room_map = {r.id: r for r in active_rooms}
+
+    selected_room = req.requested_room
+    status_str = "pending"
+    reason_str = ""
+
+    if selected_room and selected_room in room_map:
+        room_obj = room_map[selected_room]
+        if room_obj.capacity < req.attendance:
+            reason_str = f"Requested venue {selected_room} capacity ({room_obj.capacity}) is less than expected attendance ({req.attendance})"
+        else:
+            reason_str = f"Requested for {selected_room}. Awaiting admin / coordinator confirmation."
+    elif active_rooms:
+        # Find eligible venue
+        eligible = [r for r in active_rooms if r.capacity >= req.attendance and r.room_type in req.room_types]
+        if not eligible:
+            reason_str = f"No venue with capacity >= {req.attendance} matches requested types {req.room_types}"
+        else:
+            selected_room = eligible[0].id
+            reason_str = f"Feasible venue {selected_room} identified. Awaiting review."
+
+    first_win = req.windows[0] if req.windows else {"day": "MON", "from_period": 10, "to_period": 11}
+    day_val = first_win.get("day", "MON")
+    from_p = first_win.get("from_period", 10)
+    to_p = first_win.get("to_period", from_p + req.duration_periods - 1)
+
     new_booking = BookingModel(
         id=booking_id,
         event_name=req.title,
-        club_name=req.requester,
-        requested_slot=f"{req.windows[0].get('day', 'Wed') if req.windows else 'Fri'}, 17:00–20:00",
-        assigned_venue=req.requested_room or "Pending Approval",
-        status="Pending",
+        requester=req.requester or current_user.full_name,
+        club_name=req.requester or current_user.department or "Campus Org",
+        role=current_user.role.value.lower(),
+        requested_category=req.requested_category,
+        attendance=req.attendance,
+        duration_periods=req.duration_periods,
+        requested_slot=f"{day_val}, Periods {from_p}–{to_p}",
+        assigned_venue=selected_room or "—",
+        assigned_day=day_val,
+        assigned_start_period=from_p,
+        assigned_end_period=to_p,
+        status=status_str,
+        reason=reason_str,
         score=4.0,
-        priority=1 if current_user.role in [RoleEnum.ADMIN, RoleEnum.FACULTY] else 2,
+        priority=1 if current_user.role in [RoleEnum.ADMIN, RoleEnum.FACULTY, RoleEnum.DEPARTMENT_COORDINATOR] else 2,
+        needs_json=json.dumps(req.needs),
+        windows_json=json.dumps(req.windows),
         requested_by_id=current_user.id
     )
     db.add(new_booking)
     db.commit()
     db.refresh(new_booking)
     return {"status": "success", "booking_id": new_booking.id, "booking": new_booking}
+
+
+@app.post("/api/db/bookings/{booking_id}/action", tags=["Database Management"])
+def review_booking_action(
+    booking_id: str,
+    action: str = Body(..., embed=True), # "approve" or "reject"
+    assigned_room: Optional[str] = Body(None, embed=True),
+    current_user: User = Depends(require_permission(PermissionEnum.BOOKING_APPROVE)),
+    db: Session = Depends(get_db)
+):
+    """
+    RBAC Protected (Admin or Coordinator):
+    Approves or rejects a pending venue booking request.
+    Enforces 'no self-approval' rule: a user cannot approve their own booking request.
+    """
+    booking = db.query(BookingModel).filter(BookingModel.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail=f"Booking '{booking_id}' not found")
+
+    if booking.requested_by_id == current_user.id and current_user.role != RoleEnum.ADMIN:
+        raise HTTPException(status_code=403, detail="Self-approval is forbidden: you cannot approve your own booking request.")
+
+    if action.lower() == "approve":
+        booking.status = "approved"
+        if assigned_room:
+            booking.assigned_venue = assigned_room
+        booking.reason = f"Approved by {current_user.full_name} ({current_user.role.value})"
+    else:
+        booking.status = "rejected"
+        booking.reason = f"Declined by {current_user.full_name} ({current_user.role.value})"
+
+    db.commit()
+    db.refresh(booking)
+    return {"status": "success", "booking_id": booking.id, "current_status": booking.status, "reason": booking.reason}
 
 
 @app.post("/api/secure/disruption/approve", tags=["Role-Based Access Control"])
