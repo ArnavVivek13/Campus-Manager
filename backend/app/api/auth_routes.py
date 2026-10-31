@@ -55,16 +55,48 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     user: UserResponse
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register", status_code=status.HTTP_201_CREATED)
 def register(req: RegisterRequest, db: Session = Depends(get_db)):
     """
-    Public self-registration is disabled to prevent unauthorized account creation.
-    Institutional accounts must be provisioned by the Administrator via User Management.
+    Self-Registration:
+    Allows prospective campus members to submit their account request with their chosen role.
+    Account is registered in pending state (is_active=False) until approved by the Administrator.
     """
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Public self-registration is disabled. Institutional accounts must be provisioned by the Administrator."
+    email_clean = req.email.strip().lower()
+    existing = db.query(User).filter(User.email == email_clean).first()
+    if existing:
+        if not existing.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"An account for '{email_clean}' has already been submitted and is currently awaiting Administrator approval."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"An active account with email '{email_clean}' already exists. Please log in."
+        )
+
+    assigned_role = req.role if req.role in RoleEnum else RoleEnum.STUDENT
+    new_user = User(
+        email=email_clean,
+        full_name=req.full_name.strip(),
+        role=assigned_role,
+        department=req.department.strip() if req.department else "General Academics",
+        hashed_password=hash_password(req.password),
+        is_active=False,
+        oauth_provider="self-registered"
     )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {
+        "status": "pending_approval",
+        "message": "Account registration submitted successfully. Your request has been sent to the Administrator for approval.",
+        "user_id": new_user.id,
+        "email": new_user.email,
+        "role": new_user.role.value,
+        "is_active": new_user.is_active
+    }
+
 
 @router.post("/login", response_model=TokenResponse)
 def login(req: LoginRequest, db: Session = Depends(get_db)):
@@ -85,7 +117,12 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
         )
     
     if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated")
+        if user.oauth_provider == "self-registered":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your account is awaiting Administrator approval. Please check back once verified by campus administration."
+            )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account has been deactivated by the Administrator.")
 
     token_payload = {"sub": str(user.id), "email": user.email, "role": user.role.value}
     access_token = create_access_token(token_payload)

@@ -2655,10 +2655,30 @@ prof.patel@cit.edu, Dr. Meera Patel, FACULTY, Faculty@123, Mathematics`
     )
   }
 
+  const pendingUsers = users.filter(u => !u.is_active)
+  const activeUsers = users.filter(u => u.is_active)
+
+  const handleApproveUser = async (userId: number, userName: string) => {
+    try {
+      const token = localStorage.getItem('auth_token')
+      const res = await fetch(`${API_BASE}/api/admin/users/${userId}/approve`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Approval failed')
+      showToast(`Account for ${userName} approved and activated!`, 'success')
+      fetchUsers()
+    } catch (err: any) {
+      showToast(err.message || 'Error approving user', 'error')
+    }
+  }
+
   const roleBadgeStyle = (r: string) => {
     switch (r) {
       case 'ADMIN': return 'bg-purple-500/10 text-purple-600 border-purple-500/20'
       case 'FACULTY': return 'bg-sky-500/10 text-sky-600 border-sky-500/20'
+      case 'DEPARTMENT_COORDINATOR': return 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20'
       case 'CLUB_LEAD': return 'bg-amber-500/10 text-amber-600 border-amber-500/20'
       default: return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
     }
@@ -2694,6 +2714,92 @@ prof.patel@cit.edu, Dr. Meera Patel, FACULTY, Faculty@123, Mathematics`
           </button>
         </div>
       </div>
+
+      {/* Pending Account Approvals Queue */}
+      <Panel className="overflow-hidden border-amber-500/30">
+        <div className="flex items-center justify-between border-b border-timetable-grid p-4 bg-amber-500/5">
+          <div className="flex items-center gap-2">
+            <UserCheck className="size-4 text-amber-600" />
+            <h3 className="text-sm font-semibold text-foreground">Pending Account Approvals</h3>
+          </div>
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+            pendingUsers.length > 0
+              ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400'
+              : 'bg-secondary text-muted-foreground'
+          }`}>
+            {pendingUsers.length} {pendingUsers.length === 1 ? 'request' : 'requests'}
+          </span>
+        </div>
+
+        {pendingUsers.length === 0 ? (
+          <div className="p-6 text-center text-xs text-muted-foreground">
+            <CheckCircle2 className="size-5 text-emerald-500 mx-auto mb-1.5 opacity-80" />
+            No pending account requests in the approval queue. All campus registrations have been reviewed.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-muted/50 border-b border-timetable-grid text-muted-foreground uppercase text-[10px] tracking-wider">
+                <tr>
+                  <th className="py-2.5 px-4">Applicant</th>
+                  <th className="py-2.5 px-4">Requested Role</th>
+                  <th className="py-2.5 px-4">Department / Org</th>
+                  <th className="py-2.5 px-4">Submitted At</th>
+                  <th className="py-2.5 px-4 text-right">Review Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-timetable-grid">
+                {pendingUsers.map(u => (
+                  <tr key={u.id} className="hover:bg-muted/30 transition">
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-2.5">
+                        <div className="grid size-7 place-items-center rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[11px] font-bold">
+                          {u.full_name?.charAt(0) || 'U'}
+                        </div>
+                        <div>
+                          <div className="font-medium text-foreground">{u.full_name}</div>
+                          <div className="text-[11px] text-muted-foreground">{u.email}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${roleBadgeStyle(u.role)}`}>
+                        {u.role.replace('_', ' ')}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-muted-foreground">
+                      {u.department || 'General'}
+                    </td>
+                    <td className="py-3 px-4 text-muted-foreground text-[11px]">
+                      {u.created_at ? new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recent'}
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleApproveUser(u.id, u.full_name)}
+                          className="flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-medium text-white hover:bg-emerald-700 transition shadow-xs"
+                          title="Approve Account & Grant Access"
+                        >
+                          <Check className="size-3" />
+                          <span>Approve</span>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteUser(u.id, u.email)}
+                          className="flex items-center gap-1 rounded-full border border-rose-500/30 px-2.5 py-1 text-[11px] font-medium text-rose-600 hover:bg-rose-600 hover:text-white transition"
+                          title="Reject / Decline Request"
+                        >
+                          <X className="size-3" />
+                          <span>Decline</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
 
       {/* Add Single User Form */}
       <Panel className="p-5">
@@ -2820,15 +2926,15 @@ prof.patel@cit.edu, Dr. Meera Patel, FACULTY, Faculty@123, Mathematics`
         </div>
       )}
 
-      {/* Users Roster Table */}
+      {/* Active Users Roster Table */}
       <Panel className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-timetable-grid p-4">
           <div className="flex items-center gap-2">
             <Users className="size-4 text-muted-foreground" />
-            <h3 className="text-sm font-semibold text-foreground">Provisioned Institutional Users</h3>
+            <h3 className="text-sm font-semibold text-foreground">Active Institutional Users</h3>
           </div>
           <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
-            {users.length} {users.length === 1 ? 'account' : 'accounts'}
+            {activeUsers.length} {activeUsers.length === 1 ? 'account' : 'accounts'}
           </span>
         </div>
         <div className="overflow-x-auto">
@@ -2843,7 +2949,7 @@ prof.patel@cit.edu, Dr. Meera Patel, FACULTY, Faculty@123, Mathematics`
               </tr>
             </thead>
             <tbody className="divide-y divide-timetable-grid">
-              {users.map(u => (
+              {activeUsers.map(u => (
                 <tr key={u.id} className="hover:bg-muted/30 transition">
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-2.5">
@@ -2858,7 +2964,7 @@ prof.patel@cit.edu, Dr. Meera Patel, FACULTY, Faculty@123, Mathematics`
                   </td>
                   <td className="py-3 px-4">
                     <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${roleBadgeStyle(u.role)}`}>
-                      {u.role}
+                      {u.role.replace('_', ' ')}
                     </span>
                   </td>
                   <td className="py-3 px-4 text-muted-foreground">
@@ -2867,15 +2973,11 @@ prof.patel@cit.edu, Dr. Meera Patel, FACULTY, Faculty@123, Mathematics`
                   <td className="py-3 px-4">
                     <button
                       onClick={() => handleToggleStatus(u.id)}
-                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition ${
-                        u.is_active
-                          ? 'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20'
-                          : 'bg-rose-500/10 text-rose-600 hover:bg-rose-500/20'
-                      }`}
+                      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20"
                       title="Click to toggle status"
                     >
-                      <span className={`size-1.5 rounded-full ${u.is_active ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                      {u.is_active ? 'Active' : 'Inactive'}
+                      <span className="size-1.5 rounded-full bg-emerald-500" />
+                      Active
                     </button>
                   </td>
                   <td className="py-3 px-4 text-right">
@@ -2889,10 +2991,10 @@ prof.patel@cit.edu, Dr. Meera Patel, FACULTY, Faculty@123, Mathematics`
                   </td>
                 </tr>
               ))}
-              {users.length === 0 && !loading && (
+              {activeUsers.length === 0 && !loading && (
                 <tr>
                   <td colSpan={5} className="py-8 text-center text-muted-foreground">
-                    No users provisioned yet. Use the form above to add an authorized user.
+                    No active accounts yet. Review pending approvals or use the form above to add an authorized user.
                   </td>
                 </tr>
               )}
@@ -2913,11 +3015,20 @@ function AuthScreen({
   dark: boolean
   setDark: React.Dispatch<React.SetStateAction<boolean>>
 }) {
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [regSuccess, setRegSuccess] = useState('')
+
+  // Self-Registration Form State
+  const [regFullName, setRegFullName] = useState('')
+  const [regEmail, setRegEmail] = useState('')
+  const [regPassword, setRegPassword] = useState('')
+  const [regRole, setRegRole] = useState('STUDENT')
+  const [regDepartment, setRegDepartment] = useState('Computer Science')
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -2926,6 +3037,7 @@ function AuthScreen({
       return
     }
     setError('')
+    setRegSuccess('')
     setLoading(true)
     try {
       const res = await fetch(`${API_BASE}/api/auth/login`, {
@@ -2945,10 +3057,48 @@ function AuthScreen({
     }
   }
 
-  const fillAdmin = () => {
-    setEmail('admin@cit.edu')
-    setPassword('Admin@123')
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!regEmail.trim() || !regPassword.trim() || !regFullName.trim()) {
+      setError('Please fill in all required registration fields.')
+      return
+    }
     setError('')
+    setLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: regEmail.trim(),
+          password: regPassword.trim(),
+          full_name: regFullName.trim(),
+          role: regRole,
+          department: regDepartment.trim()
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.detail || 'Registration failed.')
+      }
+      setRegSuccess(`Registration submitted for ${regFullName.trim()} (${regRole.replace('_', ' ')})! Your request is pending Administrator approval.`)
+      setEmail(regEmail.trim())
+      setAuthMode('login')
+      setRegFullName('')
+      setRegEmail('')
+      setRegPassword('')
+    } catch (err: any) {
+      setError(err.message || 'Unable to submit registration.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fillQuickUser = (eMail: string, pWord: string) => {
+    setEmail(eMail)
+    setPassword(pWord)
+    setError('')
+    setRegSuccess('')
   }
 
   return (
@@ -2983,13 +3133,57 @@ function AuthScreen({
             </button>
           </div>
 
-          {/* Institutional Access Notice */}
-          <div className="mt-5 rounded-lg border border-purple-500/20 bg-purple-500/5 p-3 text-xs text-foreground/80 flex items-start gap-2.5">
+          {/* Mode Switcher: Sign In vs Request Account */}
+          <div className="mt-5 grid grid-cols-2 rounded-lg bg-muted p-1 border border-timetable-grid">
+            <button
+              type="button"
+              onClick={() => { setAuthMode('login'); setError(''); }}
+              className={`rounded-md py-1.5 text-xs font-semibold transition ${
+                authMode === 'login'
+                  ? 'bg-card text-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAuthMode('register'); setError(''); setRegSuccess(''); }}
+              className={`rounded-md py-1.5 text-xs font-semibold transition ${
+                authMode === 'register'
+                  ? 'bg-card text-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Request Account
+            </button>
+          </div>
+
+          {/* Institutional Info Banner */}
+          <div className="mt-4 rounded-lg border border-purple-500/20 bg-purple-500/5 p-3 text-xs text-foreground/80 flex items-start gap-2.5">
             <ShieldCheck className="size-4 text-purple-500 shrink-0 mt-0.5" />
             <div>
-              <span className="font-semibold text-foreground">Institutional Access Control:</span> Only authorized campus accounts provisioned by the Administrator can sign in.
+              {authMode === 'login' ? (
+                <>
+                  <span className="font-semibold text-foreground">Role-Based Access:</span> Sign in with your approved institutional credentials.
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold text-foreground">Institutional Onboarding:</span> Submit your details and role. Your account will be routed to the Administrator for approval before activation.
+                </>
+              )}
             </div>
           </div>
+
+          {/* Success Notification */}
+          {regSuccess && (
+            <div className="mt-4 flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-400">
+              <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-semibold">Submitted for Review:</span> {regSuccess}
+              </div>
+            </div>
+          )}
 
           {/* Error Banner */}
           {error && (
@@ -2999,77 +3193,213 @@ function AuthScreen({
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="mt-5 space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-foreground mb-1.5" htmlFor="login-email">
-                Institutional Email
-              </label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+          {/* Sign In Form */}
+          {authMode === 'login' && (
+            <form onSubmit={handleLogin} className="mt-5 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1.5" htmlFor="login-email">
+                  Institutional Email
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+                  <input
+                    id="login-email"
+                    type="email"
+                    required
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="name@cit.edu"
+                    className="w-full rounded-md border border-timetable-grid bg-muted pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1.5" htmlFor="login-password">
+                  Password
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+                  <input
+                    id="login-password"
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="Enter password"
+                    className="w-full rounded-md border border-timetable-grid bg-muted pl-9 pr-9 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(v => !v)}
+                    className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground"
+                    aria-label="Toggle password visibility"
+                  >
+                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full flex items-center justify-center gap-2 rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-ink-foreground hover:opacity-90 transition disabled:opacity-50 shadow-sm"
+                >
+                  {loading ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+                  Sign In
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Request Account / Registration Form */}
+          {authMode === 'register' && (
+            <form onSubmit={handleRegister} className="mt-5 space-y-3.5">
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1" htmlFor="reg-name">
+                  Full Name
+                </label>
                 <input
-                  id="login-email"
-                  type="email"
+                  id="reg-name"
+                  type="text"
                   required
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="name@cit.edu"
-                  className="w-full rounded-md border border-timetable-grid bg-muted pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+                  value={regFullName}
+                  onChange={e => setRegFullName(e.target.value)}
+                  placeholder="e.g. Dr. Arindam Bose"
+                  className="w-full rounded-md border border-timetable-grid bg-muted px-3 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
-            </div>
 
-            <div>
-              <label className="block text-xs font-medium text-foreground mb-1.5" htmlFor="login-password">
-                Password
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
-                <input
-                  id="login-password"
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="Enter password"
-                  className="w-full rounded-md border border-timetable-grid bg-muted pl-9 pr-9 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-                />
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1" htmlFor="reg-email">
+                  Institutional Email
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-2 size-3.5 text-muted-foreground" />
+                  <input
+                    id="reg-email"
+                    type="email"
+                    required
+                    value={regEmail}
+                    onChange={e => setRegEmail(e.target.value)}
+                    placeholder="arindam.bose@cit.edu"
+                    className="w-full rounded-md border border-timetable-grid bg-muted pl-8 pr-3 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">
+                    Requested Role
+                  </label>
+                  <select
+                    value={regRole}
+                    onChange={e => setRegRole(e.target.value)}
+                    className="w-full rounded-md border border-timetable-grid bg-muted px-2.5 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="STUDENT">Student</option>
+                    <option value="FACULTY">Faculty Member</option>
+                    <option value="DEPARTMENT_COORDINATOR">Department Coordinator</option>
+                    <option value="CLUB_LEAD">Club Representative</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">
+                    Department / Org
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={regDepartment}
+                    onChange={e => setRegDepartment(e.target.value)}
+                    placeholder="e.g. Computer Science"
+                    className="w-full rounded-md border border-timetable-grid bg-muted px-2.5 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1" htmlFor="reg-password">
+                  Password
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-2 size-3.5 text-muted-foreground" />
+                  <input
+                    id="reg-password"
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={regPassword}
+                    onChange={e => setRegPassword(e.target.value)}
+                    placeholder="Create a password"
+                    className="w-full rounded-md border border-timetable-grid bg-muted pl-8 pr-8 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(v => !v)}
+                    className="absolute right-2.5 top-2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showPassword ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full flex items-center justify-center gap-2 rounded-full bg-ink px-4 py-2 text-xs font-medium text-ink-foreground hover:opacity-90 transition disabled:opacity-50 shadow-sm"
+                >
+                  {loading ? <Loader2 className="size-3.5 animate-spin" /> : <UserPlus className="size-3.5" />}
+                  Submit Account Request
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Quick Demo Credentials Helper */}
+          {authMode === 'login' && (
+            <div className="mt-5 pt-4 border-t border-timetable-grid space-y-2">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                Quick Demo Sign In
+              </p>
+              <div className="grid grid-cols-2 gap-2 text-xs">
                 <button
                   type="button"
-                  onClick={() => setShowPassword(v => !v)}
-                  className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground"
-                  aria-label="Toggle password visibility"
+                  onClick={() => fillQuickUser('admin@cit.edu', 'Admin@123')}
+                  className="flex items-center justify-between rounded-lg border border-purple-500/20 bg-purple-500/5 p-2 text-left hover:bg-purple-500/10 transition"
                 >
-                  {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  <span className="font-medium text-purple-600 dark:text-purple-400">Admin</span>
+                  <span className="text-[10px] text-muted-foreground">admin@cit.edu</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fillQuickUser('faculty@cit.edu', 'Faculty@123')}
+                  className="flex items-center justify-between rounded-lg border border-sky-500/20 bg-sky-500/5 p-2 text-left hover:bg-sky-500/10 transition"
+                >
+                  <span className="font-medium text-sky-600 dark:text-sky-400">Faculty</span>
+                  <span className="text-[10px] text-muted-foreground">faculty@cit.edu</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fillQuickUser('club@cit.edu', 'Club@123')}
+                  className="flex items-center justify-between rounded-lg border border-amber-500/20 bg-amber-500/5 p-2 text-left hover:bg-amber-500/10 transition"
+                >
+                  <span className="font-medium text-amber-600 dark:text-amber-400">Club Lead</span>
+                  <span className="text-[10px] text-muted-foreground">club@cit.edu</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fillQuickUser('student@cit.edu', 'Student@123')}
+                  className="flex items-center justify-between rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2 text-left hover:bg-emerald-500/10 transition"
+                >
+                  <span className="font-medium text-emerald-600 dark:text-emerald-400">Student</span>
+                  <span className="text-[10px] text-muted-foreground">student@cit.edu</span>
                 </button>
               </div>
             </div>
-
-            <div className="pt-2">
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full flex items-center justify-center gap-2 rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-ink-foreground hover:opacity-90 transition disabled:opacity-50 shadow-sm"
-              >
-                {loading ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
-                Sign In
-              </button>
-            </div>
-          </form>
-
-          {/* Quick Demo Credentials Helper */}
-          <div className="mt-5 pt-4 border-t border-timetable-grid">
-            <button
-              type="button"
-              onClick={fillAdmin}
-              className="w-full flex items-center justify-between rounded-lg border border-timetable-grid bg-muted/60 p-2.5 text-xs text-foreground/80 hover:bg-muted transition"
-            >
-              <span className="flex items-center gap-1.5">
-                <Sparkles className="size-3.5 text-ev-mint" />
-                <span>Fill Default Admin (admin@cit.edu)</span>
-              </span>
-              <span className="text-[11px] font-mono text-muted-foreground">Admin@123</span>
-            </button>
-          </div>
+          )}
 
           <div className="mt-4 flex items-center justify-between text-[11px] text-muted-foreground">
             <span>Secure Institutional RBAC & JWT</span>

@@ -277,3 +277,28 @@ def toggle_user_status(
         "message": f"User '{target_user.email}' has been {state_label}."
     }
 
+
+@router.post("/{user_id}/approve")
+def approve_user_registration(
+    user_id: int,
+    current_user: User = Depends(require_role([RoleEnum.ADMIN])),
+    db: Session = Depends(get_db)
+):
+    """
+    RBAC Protected (Admin only):
+    Approves a pending self-registered user account, granting full institutional access.
+    """
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User with ID {user_id} not found.")
+
+    target.is_active = True
+    db.commit()
+    db.refresh(target)
+    return {
+        "status": "success",
+        "message": f"Account for '{target.full_name}' ({target.email}) has been approved and activated.",
+        "user_id": target.id,
+        "is_active": target.is_active
+    }
+

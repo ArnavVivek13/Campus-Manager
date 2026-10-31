@@ -42,16 +42,35 @@ def test_root_and_metadata():
     assert "days" in meta_res.json()
 
 
-def test_prevent_public_registration():
-    """Verify that random external visitors cannot self-register."""
-    res = client.post("/api/auth/register", json={
-        "email": "rando@gmail.com",
-        "password": "Password123",
-        "full_name": "Random Visitor",
-        "role": "ADMIN"
+def test_self_registration_and_admin_approval():
+    """Verify user can request account with chosen role, remaining pending until admin approves."""
+    import uuid
+    reg_email = f"student.{uuid.uuid4().hex[:6]}@cit.edu"
+    reg_res = client.post("/api/auth/register", json={
+        "email": reg_email,
+        "password": "Password@123",
+        "full_name": "Test Student",
+        "role": "STUDENT",
+        "department": "CSE"
     })
-    assert res.status_code == 403
-    assert "Public self-registration is disabled" in res.json()["detail"]
+    assert reg_res.status_code == 201
+    assert reg_res.json()["status"] == "pending_approval"
+    user_id = reg_res.json()["user_id"]
+
+    # Attempt login before approval -> Expect 403 Forbidden
+    login_res = client.post("/api/auth/login", json={"email": reg_email, "password": "Password@123"})
+    assert login_res.status_code == 403
+    assert "awaiting Administrator approval" in login_res.json()["detail"]
+
+    # Admin approves user
+    admin_token = get_admin_token()
+    appr_res = client.post(f"/api/admin/users/{user_id}/approve", headers={"Authorization": f"Bearer {admin_token}"})
+    assert appr_res.status_code == 200
+
+    # User can now log in
+    login_ok = client.post("/api/auth/login", json={"email": reg_email, "password": "Password@123"})
+    assert login_ok.status_code == 200
+    assert login_ok.json()["user"]["role"] == "STUDENT"
 
 
 def test_prevent_unprovisioned_login():
