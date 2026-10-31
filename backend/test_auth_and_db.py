@@ -43,8 +43,8 @@ def test_full_system():
     assert user_count >= 4, "Users should be seeded"
     assert room_count >= 5, "Rooms should be seeded"
 
-    # 2. Test User Registration
-    print("\n[2] Testing Registration (/api/auth/register)...")
+    # 2. Test User Registration (Disabled publicly, provisioned by Admin)
+    print("\n[2] Testing Registration Protection (/api/auth/register)...")
     reg_payload = {
         "email": "new.faculty@cit.edu",
         "password": "SecurePassword@123",
@@ -54,13 +54,15 @@ def test_full_system():
     }
     r = client.post("/api/auth/register", json=reg_payload)
     print("  Status code:", r.status_code)
-    assert r.status_code == 201, f"Expected 201 Created, got {r.status_code}: {r.text}"
-    reg_data = r.json()
-    assert "access_token" in reg_data
-    assert "refresh_token" in reg_data
-    assert reg_data["user"]["email"] == "new.faculty@cit.edu"
-    assert reg_data["user"]["role"] == "FACULTY"
-    print("  [OK] User registered successfully with JWT access token!")
+    assert r.status_code == 403, f"Expected 403 Forbidden for public registration, got {r.status_code}: {r.text}"
+    print("  [OK] Public self-registration prevented as required!")
+
+    # Login as admin and provision account
+    admin_login = client.post("/api/auth/login", json={"email": "admin@cit.edu", "password": "Admin@123"})
+    admin_token = admin_login.json()["access_token"]
+    prov_res = client.post("/api/admin/users", json=reg_payload, headers={"Authorization": f"Bearer {admin_token}"})
+    assert prov_res.status_code in [201, 200]
+    print("  [OK] Admin provisioned institutional faculty account successfully!")
 
     # 3. Test Standard Login
     print("\n[3] Testing Standard Login (/api/auth/login)...")

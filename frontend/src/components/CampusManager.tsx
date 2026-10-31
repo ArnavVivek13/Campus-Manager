@@ -172,6 +172,22 @@ export default function CampusManager() {
   const [aiLoading, setAiLoading] = useState(false)
   const [datasetLoading, setDatasetLoading] = useState(false)
   const [disruptionLoading, setDisruptionLoading] = useState(false)
+  const [confirmingBooking, setConfirmingBooking] = useState(false)
+  const [bookingForm, setBookingForm] = useState<{
+    title: string
+    attendance: number
+    duration_periods: number
+    day: string
+    start_time: string
+    requested_room: string
+  }>({
+    title: '',
+    attendance: 100,
+    duration_periods: 1,
+    day: 'MON',
+    start_time: '18:00',
+    requested_room: 'AUD'
+  })
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Live Backend State - Initialized empty by default as requested
@@ -441,6 +457,7 @@ export default function CampusManager() {
 
   const submitBooking = async () => {
     if (!bookingText.trim()) return
+    setAiLoading(true)
     try {
       const res = await fetch(`${API_BASE}/api/ai/parse-booking`, {
         method: 'POST',
@@ -450,31 +467,43 @@ export default function CampusManager() {
       if (res.ok) {
         const data = await res.json()
         setParsedData(data)
+        const firstWin = data.windows?.[0]
+        setBookingForm({
+          title: data.title || (bookingText.length > 50 ? bookingText.slice(0, 47) + '...' : bookingText),
+          attendance: data.attendance || 100,
+          duration_periods: data.duration_periods || 1,
+          day: firstWin?.day || 'MON',
+          start_time: firstWin?.start_time || '18:00',
+          requested_room: data.requested_room || 'AUD'
+        })
       }
     } catch {
       /* offline preview fallback */
+    } finally {
+      setAiLoading(false)
+      setParsed(true)
     }
-    setParsed(true)
   }
 
   const confirmBookingDb = async () => {
+    if (confirmingBooking) return
+    setConfirmingBooking(true)
     try {
       const token = localStorage.getItem('auth_token')
-      const firstWin = parsedData?.windows?.[0]
       const payload = {
-        requester: 'Campus User',
-        title: parsedData?.title || bookingText || 'Event Request',
-        attendance: parsedData?.attendance || 100,
-        duration_periods: parsedData?.duration_periods || 1,
+        requester: currentUser?.full_name || 'Campus User',
+        title: bookingForm.title.trim() || parsedData?.title || bookingText || 'Event Request',
+        attendance: Number(bookingForm.attendance) || 100,
+        duration_periods: Number(bookingForm.duration_periods) || 1,
         windows: [{
-          day: firstWin?.day || 'WED',
-          from_period: firstWin?.from_period || 10,
-          to_period: firstWin?.to_period || 11,
-          start_time: firstWin?.start_time || '18:00'
+          day: bookingForm.day || 'MON',
+          from_period: 10,
+          to_period: 10 + (Number(bookingForm.duration_periods) || 1) - 1,
+          start_time: bookingForm.start_time || '18:00'
         }],
-        room_types: parsedData?.room_types || ['auditorium', 'seminar_hall'],
+        room_types: parsedData?.room_types?.length ? parsedData.room_types : ['auditorium', 'seminar_hall'],
         needs: parsedData?.needs || [],
-        requested_room: parsedData?.requested_room || 'AUD'
+        requested_room: bookingForm.requested_room || 'AUD'
       }
       const res = await fetch(`${API_BASE}/api/db/bookings`, {
         method: 'POST',
@@ -484,17 +513,19 @@ export default function CampusManager() {
         },
         body: JSON.stringify(payload)
       })
+      const data = await res.json()
       if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.detail || 'Failed to submit booking')
+        throw new Error(data.detail || 'Failed to submit booking')
       }
-      setNotice('Booking proposal successfully saved into live SQL database.')
-      showToast('Booking submitted and awaiting admin approval!', 'success')
+      setNotice(`Booking proposal ${data.booking_id} successfully saved into live SQL database.`)
+      showToast(`Booking ${data.booking_id} submitted and awaiting admin approval!`, 'success')
       setParsed(false)
       setBookingText('')
       fetchBookings()
     } catch (err: any) {
       showToast(err.message || 'Error submitting booking', 'error')
+    } finally {
+      setConfirmingBooking(false)
     }
   }
 
@@ -1200,7 +1231,21 @@ export default function CampusManager() {
               isLoading={disruptionLoading}
             />
           )}
-          {activeTab === 4 && <Assistant bookingText={bookingText} setBookingText={setBookingText} parsed={parsed} parsedData={parsedData} submitBooking={submitBooking} confirmBooking={confirmBookingDb} venuesList={venuesList} />}
+          {activeTab === 4 && (
+            <Assistant
+              bookingText={bookingText}
+              setBookingText={setBookingText}
+              parsed={parsed}
+              parsedData={parsedData}
+              bookingForm={bookingForm}
+              setBookingForm={setBookingForm}
+              submitBooking={submitBooking}
+              confirmBooking={confirmBookingDb}
+              confirming={confirmingBooking}
+              aiLoading={aiLoading}
+              venuesList={venuesList}
+            />
+          )}
           {activeTab === 5 && <UserManagementTab showToast={showToast} />}
         </div>
       </div>
@@ -2163,16 +2208,38 @@ function Assistant({
   setBookingText,
   parsed,
   parsedData,
+  bookingForm,
+  setBookingForm,
   submitBooking,
   confirmBooking,
+  confirming,
+  aiLoading,
   venuesList
 }: {
   bookingText: string
   setBookingText: (v: string) => void
   parsed: boolean
   parsedData: any
+  bookingForm: {
+    title: string
+    attendance: number
+    duration_periods: number
+    day: string
+    start_time: string
+    requested_room: string
+  }
+  setBookingForm: React.Dispatch<React.SetStateAction<{
+    title: string
+    attendance: number
+    duration_periods: number
+    day: string
+    start_time: string
+    requested_room: string
+  }>>
   submitBooking: () => void
   confirmBooking: () => void
+  confirming: boolean
+  aiLoading: boolean
   venuesList: [string, string, string][]
 }) {
   return <div>
@@ -2183,19 +2250,115 @@ function Assistant({
         <div className="p-5">
           <label className="mb-2 block text-sm font-medium" htmlFor="booking-request">Request details</label>
           <textarea id="booking-request" value={bookingText} onChange={e => setBookingText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitBooking() } }} className="min-h-28 w-full resize-none rounded-lg border border-timetable-grid bg-muted p-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring" placeholder="e.g. 'seminar hall kal shaam 6 baje, 2 ghante, 100 log, mic chahiye'" />
-          <div className="mt-3 flex items-center justify-between"><span className="text-xs text-muted-foreground"><Command className="mr-1 inline size-3" />Enter to parse</span><button onClick={submitBooking} className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground"><Send className="size-3.5" />Parse request</button></div>
+          <div className="mt-3 flex items-center justify-between">
+            <span className="text-xs text-muted-foreground"><Command className="mr-1 inline size-3" />Enter to parse</span>
+            <button
+              onClick={submitBooking}
+              disabled={aiLoading}
+              className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground disabled:opacity-50"
+            >
+              {aiLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+              <span>{aiLoading ? 'Parsing...' : 'Parse request'}</span>
+            </button>
+          </div>
           {parsed && <div className="mt-6 rounded-lg border border-timetable-grid">
-            <div className="flex items-center justify-between border-b border-timetable-grid p-4"><div><p className="text-sm font-medium">Parsed booking request</p><p className="mt-1 text-xs text-muted-foreground">Review fields before submitting to live DBMS.</p></div><Confirmed /></div>
-            <div className="grid gap-4 p-4 sm:grid-cols-2">{[
-              ['Title', parsedData?.title || bookingText || 'Seminar Hall Request'],
-              ['Attendance', `${parsedData?.attendance || 100} people`],
-              ['Duration', `${parsedData?.duration_periods || 2} hours`],
-              ['Day', parsedData?.windows?.[0]?.day || 'Tomorrow'],
-              ['Start', parsedData?.windows?.[0]?.start_time || '18:00'],
-              ['Requested room', parsedData?.requested_room || 'Seminar Hall']
-            ].map(([l, v]) => <label key={l} className="text-xs text-muted-foreground">{l}<input defaultValue={v} className="mt-1.5 w-full rounded-md border border-timetable-grid px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring" /></label>)}</div>
-            <div className="flex flex-wrap gap-2 border-t border-timetable-grid p-4">{['Projector', 'PA System', 'Stage', 'Accessible'].map(n => <label key={n} className="flex items-center gap-2 rounded-full bg-secondary px-3 py-1.5 text-xs"><input type="checkbox" defaultChecked={n === 'PA System' || (parsedData?.needs || []).includes(n.toLowerCase().replace(' ', '_'))} className="accent-foreground" />{n}</label>)}</div>
-            <div className="flex justify-end gap-2 border-t border-timetable-grid p-4"><button onClick={() => setBookingText('')} className="rounded-full bg-secondary px-4 py-2 text-sm">Clear</button><button onClick={confirmBooking} className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground">Submit booking</button></div>
+            <div className="flex items-center justify-between border-b border-timetable-grid p-4">
+              <div>
+                <p className="text-sm font-medium">Parsed booking request</p>
+                <p className="mt-1 text-xs text-muted-foreground">Review and edit fields before submitting to live DBMS.</p>
+              </div>
+              <Confirmed />
+            </div>
+            <div className="grid gap-4 p-4 sm:grid-cols-2">
+              <label className="text-xs text-muted-foreground">
+                Event Title
+                <input
+                  type="text"
+                  value={bookingForm.title}
+                  onChange={e => setBookingForm(prev => ({ ...prev, title: e.target.value }))}
+                  className="mt-1.5 w-full rounded-md border border-timetable-grid px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+                />
+              </label>
+              <label className="text-xs text-muted-foreground">
+                Attendance (people)
+                <input
+                  type="number"
+                  value={bookingForm.attendance}
+                  onChange={e => setBookingForm(prev => ({ ...prev, attendance: parseInt(e.target.value) || 0 }))}
+                  className="mt-1.5 w-full rounded-md border border-timetable-grid px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+                />
+              </label>
+              <label className="text-xs text-muted-foreground">
+                Duration (periods)
+                <input
+                  type="number"
+                  min={1}
+                  max={6}
+                  value={bookingForm.duration_periods}
+                  onChange={e => setBookingForm(prev => ({ ...prev, duration_periods: parseInt(e.target.value) || 1 }))}
+                  className="mt-1.5 w-full rounded-md border border-timetable-grid px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+                />
+              </label>
+              <label className="text-xs text-muted-foreground">
+                Day
+                <select
+                  value={bookingForm.day}
+                  onChange={e => setBookingForm(prev => ({ ...prev, day: e.target.value }))}
+                  className="mt-1.5 w-full rounded-md border border-timetable-grid bg-muted px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="MON">Monday (MON)</option>
+                  <option value="TUE">Tuesday (TUE)</option>
+                  <option value="WED">Wednesday (WED)</option>
+                  <option value="THU">Thursday (THU)</option>
+                  <option value="FRI">Friday (FRI)</option>
+                </select>
+              </label>
+              <label className="text-xs text-muted-foreground">
+                Start Time
+                <input
+                  type="text"
+                  value={bookingForm.start_time}
+                  onChange={e => setBookingForm(prev => ({ ...prev, start_time: e.target.value }))}
+                  className="mt-1.5 w-full rounded-md border border-timetable-grid px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+                />
+              </label>
+              <label className="text-xs text-muted-foreground">
+                Requested Room / Venue
+                <input
+                  type="text"
+                  value={bookingForm.requested_room}
+                  onChange={e => setBookingForm(prev => ({ ...prev, requested_room: e.target.value }))}
+                  className="mt-1.5 w-full rounded-md border border-timetable-grid px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+                />
+              </label>
+            </div>
+            <div className="flex flex-wrap gap-2 border-t border-timetable-grid p-4">
+              {['Projector', 'PA System', 'Stage', 'Accessible'].map(n => (
+                <label key={n} className="flex items-center gap-2 rounded-full bg-secondary px-3 py-1.5 text-xs">
+                  <input type="checkbox" defaultChecked={n === 'PA System' || (parsedData?.needs || []).includes(n.toLowerCase().replace(' ', '_'))} className="accent-foreground" />
+                  {n}
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-timetable-grid p-4">
+              <button
+                type="button"
+                onClick={() => setBookingText('')}
+                disabled={confirming}
+                className="rounded-full bg-secondary px-4 py-2 text-sm disabled:opacity-50"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={confirmBooking}
+                disabled={confirming}
+                className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground disabled:opacity-50"
+              >
+                {confirming ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                <span>{confirming ? 'Submitting...' : 'Submit booking'}</span>
+              </button>
+            </div>
           </div>}
         </div>
       </Panel>

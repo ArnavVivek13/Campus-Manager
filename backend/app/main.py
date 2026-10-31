@@ -36,6 +36,7 @@ from backend.app.db.persistence import sync_dataset_to_db, sync_schedule_to_db, 
 from backend.app.auth.rbac import get_current_user, require_role, require_permission, PermissionEnum
 from backend.app.api.auth_routes import router as auth_router
 from backend.app.api.user_routes import router as user_router
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 app = FastAPI(
@@ -1024,6 +1025,24 @@ def create_db_booking(
     import uuid
     booking_id = f"BK-{uuid.uuid4().hex[:6].upper()}"
 
+    first_win = req.windows[0] if req.windows else {"day": "MON", "from_period": 10, "to_period": 11}
+    day_val = first_win.get("day", "MON")
+    from_p = first_win.get("from_period", 10)
+    to_p = first_win.get("to_period", from_p + req.duration_periods - 1)
+
+    # Duplicate Prevention Check 1: Event Name
+    event_title_clean = (req.title or "").strip()
+    if event_title_clean:
+        existing_title = db.query(BookingModel).filter(
+            func.lower(BookingModel.event_name) == event_title_clean.lower(),
+            BookingModel.status.in_(["pending", "approved", "Pending", "Approved"])
+        ).first()
+        if existing_title:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Duplicate booking: An active request for '{event_title_clean}' already exists (ID: {existing_title.id}, Status: {existing_title.status.capitalize()})."
+            )
+
     # Availability Pre-check against loaded rooms
     active_rooms = db.query(Room).all()
     room_map = {r.id: r for r in active_rooms}
@@ -1039,18 +1058,40 @@ def create_db_booking(
         else:
             reason_str = f"Requested for {selected_room}. Awaiting admin / coordinator confirmation."
     elif active_rooms:
-        # Find eligible venue
+        # Find eligible venue that doesn't conflict with any active booking
         eligible = [r for r in active_rooms if r.capacity >= req.attendance and r.room_type in req.room_types]
         if not eligible:
             reason_str = f"No venue with capacity >= {req.attendance} matches requested types {req.room_types}"
         else:
-            selected_room = eligible[0].id
+            free_eligible = None
+            for r in eligible:
+                has_conflict = db.query(BookingModel).filter(
+                    BookingModel.assigned_venue == r.id,
+                    BookingModel.assigned_day == day_val,
+                    BookingModel.assigned_start_period <= to_p,
+                    BookingModel.assigned_end_period >= from_p,
+                    BookingModel.status.in_(["pending", "approved", "Pending", "Approved"])
+                ).first()
+                if not has_conflict:
+                    free_eligible = r.id
+                    break
+            selected_room = free_eligible or eligible[0].id
             reason_str = f"Feasible venue {selected_room} identified. Awaiting review."
 
-    first_win = req.windows[0] if req.windows else {"day": "MON", "from_period": 10, "to_period": 11}
-    day_val = first_win.get("day", "MON")
-    from_p = first_win.get("from_period", 10)
-    to_p = first_win.get("to_period", from_p + req.duration_periods - 1)
+    # Duplicate Prevention Check 2: Venue and Slot Collision
+    if selected_room and selected_room != "—":
+        conflicting_booking = db.query(BookingModel).filter(
+            BookingModel.assigned_venue == selected_room,
+            BookingModel.assigned_day == day_val,
+            BookingModel.assigned_start_period <= to_p,
+            BookingModel.assigned_end_period >= from_p,
+            BookingModel.status.in_(["pending", "approved", "Pending", "Approved"])
+        ).first()
+        if conflicting_booking:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Slot collision: Venue '{selected_room}' is already allocated or requested for '{conflicting_booking.event_name}' on {day_val} (Periods {conflicting_booking.assigned_start_period}–{conflicting_booking.assigned_end_period})."
+            )
 
     new_booking = BookingModel(
         id=booking_id,

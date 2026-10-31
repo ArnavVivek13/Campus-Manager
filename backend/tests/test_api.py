@@ -152,3 +152,47 @@ def test_restore_and_clear_data():
     empty_sched_res = client.get("/api/schedule")
     assert empty_sched_res.status_code == 200
     assert empty_sched_res.json()["count"] == 0
+
+
+def test_booking_duplicate_prevention_and_approval():
+    admin_token = get_admin_token()
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Ensure baseline is restored so rooms exist
+    client.post("/api/admin/restore-baseline", headers=admin_headers)
+
+    payload = {
+        "requester": "Robotics Club",
+        "role": "club",
+        "requested_category": "club_event",
+        "title": "Autonomous Drone Workshop",
+        "attendance": 80,
+        "duration_periods": 2,
+        "windows": [{"day": "TUE", "from_period": 10, "to_period": 11, "start_time": "18:00"}],
+        "room_types": ["seminar_hall", "auditorium"],
+        "needs": ["projector"],
+        "requested_room": "SH-1"
+    }
+
+    # 1. Create first booking
+    res1 = client.post("/api/db/bookings", json=payload, headers=admin_headers)
+    assert res1.status_code == 200, res1.text
+    b1_id = res1.json()["booking_id"]
+    assert b1_id.startswith("BK-")
+
+    # 2. Attempt duplicate booking with identical event title
+    dup_res = client.post("/api/db/bookings", json=payload, headers=admin_headers)
+    assert dup_res.status_code == 409
+    assert "Duplicate booking" in dup_res.json()["detail"]
+
+    # 3. Attempt booking with different title but colliding venue & slot
+    colliding_payload = dict(payload)
+    colliding_payload["title"] = "AI Ethics Seminar"
+    slot_res = client.post("/api/db/bookings", json=colliding_payload, headers=admin_headers)
+    assert slot_res.status_code == 409
+    assert "Slot collision" in slot_res.json()["detail"]
+
+    # 4. Admin approves original booking
+    action_res = client.post(f"/api/db/bookings/{b1_id}/action", json={"action": "approve"}, headers=admin_headers)
+    assert action_res.status_code == 200
+    assert action_res.json()["current_status"] == "approved"
