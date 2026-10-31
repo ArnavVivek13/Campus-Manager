@@ -498,6 +498,35 @@ export default function CampusManager() {
     }
   }
 
+  const handleBookingAction = async (bookingId: string, action: 'approve' | 'reject') => {
+    try {
+      const token = localStorage.getItem('auth_token')
+      const res = await fetch(`${API_BASE}/api/db/bookings/${bookingId}/action`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ action })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || `Failed to ${action} booking`)
+      showToast(`Booking ${bookingId} ${action === 'approve' ? 'approved' : 'rejected'}!`, 'success')
+      fetchBookings()
+      if (selected && selected.id === bookingId) {
+        setSelected(prev => prev ? {
+          ...prev,
+          line1: `${bookingId} · ${action === 'approve' ? 'Approved' : 'Rejected'}`,
+          hueCls: hue[action === 'approve' ? 'mint' : 'rose'],
+          fields: prev.fields.map(([k, v]) => k === 'Status' ? [k, action === 'approve' ? 'Approved' : 'Rejected'] : [k, v]),
+          note: data.reason || `Status updated to ${action}.`
+        } : null)
+      }
+    } catch (err: any) {
+      showToast(err.message || `Error updating booking`, 'error')
+    }
+  }
+
   const handleClearData = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/admin/clear-data`, { method: 'POST' })
@@ -1216,7 +1245,31 @@ export default function CampusManager() {
       <div className={`mt-5 rounded-none border border-timetable-grid p-4 ${selected.hueCls}`}><p className="text-sm font-medium">{selected.line1}</p><p className="mt-1 text-sm opacity-80">{selected.line2}</p></div>
       <div className="mt-4 grid grid-cols-2 gap-3">{selected.fields.map(([l, v]) => <div key={l} className="rounded-none border border-timetable-grid bg-muted p-3"><p className="text-[11px] text-muted-foreground">{l}</p><p className="mt-1 text-sm font-medium">{v}</p></div>)}</div>
       <div className="mt-4 rounded-lg border border-timetable-grid p-4 text-sm leading-6 text-muted-foreground"><Sparkles className="mb-2 size-4 text-foreground" />{selected.note}</div>
-      <button onClick={handleAskAiExplain} disabled={aiLoading} className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 text-sm font-medium text-ink-foreground hover:opacity-90 disabled:opacity-50">
+
+      {/* Admin / Coordinator Approval Actions for Booking Proposals */}
+      {selected.type === 'booking' && (userRole === 'ADMIN' || userRole === 'DEPARTMENT_COORDINATOR') && (
+        <div className="mt-4 pt-4 border-t border-timetable-grid flex flex-col gap-2">
+          <p className="text-xs font-semibold text-foreground uppercase tracking-wide">Review Proposal</p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleBookingAction(selected.id ?? '', 'approve')}
+              className="flex-1 flex items-center justify-center gap-1.5 rounded-full bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 transition shadow-sm"
+            >
+              <Check className="size-3.5" />
+              Approve Booking
+            </button>
+            <button
+              onClick={() => handleBookingAction(selected.id ?? '', 'reject')}
+              className="flex-1 flex items-center justify-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-600 hover:text-white transition shadow-sm"
+            >
+              <X className="size-3.5" />
+              Reject
+            </button>
+          </div>
+        </div>
+      )}
+
+      <button onClick={handleAskAiExplain} disabled={aiLoading} className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 text-sm font-medium text-ink-foreground hover:opacity-90 disabled:opacity-50">
         {aiLoading ? <Loader2 className="size-4 animate-spin" /> : <Bot className="size-4" />}
         Ask AI: Why is this placed here?
       </button>
