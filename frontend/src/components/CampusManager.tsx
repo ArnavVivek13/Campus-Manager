@@ -110,7 +110,7 @@ export default function CampusManager() {
       </aside>
 
       <div className="min-w-0 flex-1 rounded-lg bg-card p-3 lg:p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-5 py-4 text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-timetable-grid px-5 py-4 text-sm">
           <div className="flex items-center gap-2"><button onClick={() => setMenuOpen(true)} aria-label="Open menu" className="-ml-1 rounded-full p-1.5 hover:bg-accent lg:hidden"><Menu className="size-5" /></button><span className="text-muted-foreground">CIT Campus</span><ChevronRight className="size-3.5 text-muted-foreground" /><Clock3 className="size-4" /><span className="font-medium">{tabs[activeTab]}</span></div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground"><span className="size-1.5 rounded-full bg-success" />Clash-free · 0 hard violations<button role="switch" aria-checked={dark} aria-label="Toggle dark mode" onClick={() => setDark(d => !d)} className="relative ml-3 flex h-8 w-16 items-center justify-between rounded-full bg-secondary px-2 text-muted-foreground"><Sun className="size-3.5" /><Moon className="size-3.5" /><span className={`absolute top-1 size-6 rounded-full bg-ev-mint shadow-sm transition-all ${dark ? 'left-9' : 'left-1'}`} /></button></div>
         </div>
@@ -125,11 +125,11 @@ export default function CampusManager() {
       </div>
     </div>
 
-    {selected && <aside className="fixed inset-y-0 right-0 z-20 w-full max-w-md border-l border-border bg-card p-6 shadow-2xl">
+    {selected && <aside className="fixed inset-y-0 right-0 z-20 w-full max-w-md border-l border-timetable-grid bg-card p-6 shadow-2xl">
       <div className="flex items-start justify-between"><div><p className="text-xs text-muted-foreground">{selected.kicker}</p><h3 className="mt-1 text-xl font-semibold">{selected.title}</h3></div><button onClick={() => setSelected(null)} className="rounded-full p-2 hover:bg-accent" aria-label="Close"><X className="size-4" /></button></div>
       <div className={`mt-5 rounded-none p-4 ${selected.hueCls}`}><p className="text-sm font-medium">{selected.line1}</p><p className="mt-1 text-sm opacity-80">{selected.line2}</p></div>
       <div className="mt-4 grid grid-cols-2 gap-3">{selected.fields.map(([l, v]) => <div key={l} className="rounded-none bg-muted p-3"><p className="text-[11px] text-muted-foreground">{l}</p><p className="mt-1 text-sm font-medium">{v}</p></div>)}</div>
-      <div className="mt-4 rounded-lg border border-border p-4 text-sm leading-6 text-muted-foreground"><Sparkles className="mb-2 size-4 text-foreground" />{selected.note}</div>
+      <div className="mt-4 rounded-lg border border-timetable-grid p-4 text-sm leading-6 text-muted-foreground"><Sparkles className="mb-2 size-4 text-foreground" />{selected.note}</div>
       <button className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 text-sm font-medium text-ink-foreground hover:opacity-90"><Bot className="size-4" />Ask AI: Why is this class placed here?</button>
     </aside>}
   </main>
@@ -147,7 +147,7 @@ function StatusChip({ label }: { label: string }) {
 function Heading({ title, children }: { title: string; children?: React.ReactNode }) {
   return <div className="mb-6 flex flex-wrap items-center gap-x-5 gap-y-3"><h2 className="text-[26px] font-medium tracking-tight">{title}</h2><div className="flex flex-wrap gap-2">{children}</div></div>
 }
-function Panel({ children, className = '' }: { children: React.ReactNode; className?: string }) { return <section className={`rounded-lg border border-border bg-card ${className}`}>{children}</section> }
+function Panel({ children, className = '' }: { children: React.ReactNode; className?: string }) { return <section className={`rounded-lg border border-timetable-grid bg-card ${className}`}>{children}</section> }
 
 function useNow() {
   const [now, setNow] = useState<{ day: number; hour: number } | null>(null)
@@ -171,7 +171,7 @@ function Timetable({ onSelect }: { onSelect: (s: Session) => void }) {
       </div>
       <div className="relative grid grid-cols-[72px_repeat(5,1fr)] border-b border-timetable-grid" style={{ height: hours.length * HOUR_PX }}>
         <div className="border-r border-timetable-grid grid-hours">{hours.map(h => <div key={h} className="pt-2 text-sm text-foreground/80 pr-2 text-right" style={{ height: HOUR_PX }}>{fmt(h)}</div>)}</div>
-        {days.map((d, di) => <div key={d} className="relative border-r border-timetable-grid grid-hours">
+        {days.map((d, di) => <div key={d} className="relative border-r border-timetable-grid last:border-r-0 grid-hours">
           {!list.some(s => s.day === di && s.start < 14 && s.end > 13) && <div className="absolute inset-x-0 bg-warning-soft/60 px-2 py-1 text-[10px] text-warning" style={{ top: (13 - HOUR_START) * HOUR_PX, height: HOUR_PX }}>Lunch break</div>}
           {list.filter(s => s.day === di).map(s => <button key={s.id} onClick={() => onSelect(s)} className={`absolute inset-x-0 flex flex-col justify-center rounded-none p-2.5 text-left transition hover:-translate-y-0.5 hover:shadow-md ${hue[catHue[s.cat] ?? 'violet']}`} style={{ top: (s.start - HOUR_START) * HOUR_PX, height: (s.end - s.start) * HOUR_PX }}>
             <div className="flex items-start justify-between gap-2"><span className="truncate text-[13px] font-medium leading-tight">{s.name}</span><MoreHorizontal className="size-3.5 shrink-0" /></div>
@@ -207,11 +207,11 @@ function ExamGrid({ onSelect }: { onSelect: (e: string[]) => void }) {
   const list = exams.filter(e => cat === 'All' || e[1] === cat)
   return <div>
     <Heading title="Midsem Exams · 14–19 Oct">{['All', 'AM', 'PM'].map(c => <Pill key={c} active={cat === c} onClick={() => setCat(c)}>{c === 'All' ? 'All' : c === 'AM' ? 'Morning' : 'Afternoon'}</Pill>)}</Heading>
-    <div className="overflow-x-auto"><div className="grid min-w-[860px] grid-cols-[72px_repeat(6,1fr)]">
-      <div className="border-b border-border" />{['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map((d, i) => <div key={d} className="border-b border-border py-1.5 text-center text-sm text-foreground/80">{14 + i} - {d.charAt(0) + d.slice(1).toLowerCase()}</div>)}
+    <div className="overflow-x-auto"><div className="grid min-w-[860px] grid-cols-[72px_repeat(6,1fr)] border-b border-timetable-grid">
+      <div className="border-b border-r border-timetable-grid" />{['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map((d, i) => <div key={d} className="border-b border-r border-timetable-grid py-1.5 text-center text-sm text-foreground/80 last:border-r-0">{14 + i} - {d.charAt(0) + d.slice(1).toLowerCase()}</div>)}
       {['AM', 'PM'].map(slot => <React.Fragment key={slot}>
-        <div className="border-b border-border pt-3 text-sm text-foreground/80">{slot === 'AM' ? '09:30' : '14:00'}<p className="text-[11px] text-muted-foreground">{slot === 'AM' ? 'to 11:30' : 'to 16:00'}</p></div>
-        {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(d => { const e = list.find(x => x[0] === d && x[1] === slot); return <div key={d} className="min-h-[170px] border-b border-l border-border">{e && <button onClick={() => onSelect(e)} className={`flex h-full w-full flex-col justify-center rounded-none p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md ${hue[slot === 'AM' ? 'sky' : 'violet']}`}>
+        <div className="border-b border-r border-timetable-grid pt-3 text-sm text-foreground/80 pr-2 text-right">{slot === 'AM' ? '09:30' : '14:00'}<p className="text-[11px] text-muted-foreground">{slot === 'AM' ? 'to 11:30' : 'to 16:00'}</p></div>
+        {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(d => { const e = list.find(x => x[0] === d && x[1] === slot); return <div key={d} className="min-h-[170px] border-b border-r border-timetable-grid last:border-r-0">{e && <button onClick={() => onSelect(e)} className={`flex h-full w-full flex-col justify-center rounded-none p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md ${hue[slot === 'AM' ? 'sky' : 'violet']}`}>
           <div className="flex items-start justify-between"><span className="text-[13px] font-medium leading-tight">{e[3]}</span><MoreHorizontal className="size-3.5 shrink-0" /></div>
           <span className="text-[11px] opacity-75">{e[2]}</span>
           <span className="mt-2 text-[10px] opacity-75">{e[4]}</span>
@@ -239,7 +239,7 @@ function Disruption({ preview, setPreview, setNotice }: { preview: boolean; setP
         <span className="mt-4 inline-flex items-center gap-1 text-[11px] font-medium opacity-80"><GitCompareArrows className="size-3" />Room reassigned</span>
       </div>)}</div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-none bg-warning-soft p-4"><div className="flex items-start gap-2 text-[13px] text-warning"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><span>All proposed room moves preserve capacity and equipment requirements.</span></div><button onClick={() => setNotice('Schedule changes approved and committed.')} className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground">Approve & commit</button></div>
-    </> : <div className="mt-5 grid min-h-56 place-items-center rounded-none border border-dashed border-border text-center"><div><SlidersHorizontal className="mx-auto size-6 text-muted-foreground" /><p className="mt-3 text-sm font-medium">Simulation is ready</p><p className="mt-1 text-xs text-muted-foreground">Preview the diff before committing any changes.</p></div></div>}
+    </> : <div className="mt-5 grid min-h-56 place-items-center rounded-none border border-dashed border-timetable-grid text-center"><div><SlidersHorizontal className="mx-auto size-6 text-muted-foreground" /><p className="mt-3 text-sm font-medium">Simulation is ready</p><p className="mt-1 text-xs text-muted-foreground">Preview the diff before committing any changes.</p></div></div>}
   </div>
 }
 
@@ -251,13 +251,13 @@ function Assistant({ bookingText, setBookingText, parsed, submitBooking }: { boo
         <div className={`p-6 ${hue.violet}`}><div className="flex items-center gap-2 text-xs font-medium"><Bot className="size-4" />Venue booking assistant</div><h3 className="mt-3 text-xl font-medium tracking-tight">Tell us what you need. We&apos;ll find the best fit.</h3><p className="mt-2 max-w-xl text-[13px] leading-5 opacity-75">Describe your event in plain English or Hinglish. The assistant reads the requirements and checks venue availability.</p></div>
         <div className="p-5">
           <label className="mb-2 block text-sm font-medium" htmlFor="booking-request">Request details</label>
-          <textarea id="booking-request" value={bookingText} onChange={e => setBookingText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitBooking() } }} className="min-h-28 w-full resize-none rounded-lg border border-border bg-muted p-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring" placeholder="e.g. 'seminar hall kal shaam 6 baje, 2 ghante, 100 log, mic chahiye'" />
+          <textarea id="booking-request" value={bookingText} onChange={e => setBookingText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitBooking() } }} className="min-h-28 w-full resize-none rounded-lg border border-timetable-grid bg-muted p-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring" placeholder="e.g. 'seminar hall kal shaam 6 baje, 2 ghante, 100 log, mic chahiye'" />
           <div className="mt-3 flex items-center justify-between"><span className="text-xs text-muted-foreground"><Command className="mr-1 inline size-3" />Enter to parse</span><button onClick={submitBooking} className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground"><Send className="size-3.5" />Parse request</button></div>
-          {parsed && <div className="mt-6 rounded-lg border border-border">
-            <div className="flex items-center justify-between border-b border-border p-4"><div><p className="text-sm font-medium">Parsed booking request</p><p className="mt-1 text-xs text-muted-foreground">Review fields before submitting.</p></div><Confirmed /></div>
-            <div className="grid gap-4 p-4 sm:grid-cols-2">{[['Title', bookingText || 'Seminar Hall Request'], ['Attendance', '100 people'], ['Duration', '2 hours'], ['Day', 'Tomorrow'], ['Start', '18:00'], ['Requested room', 'Seminar Hall']].map(([l, v]) => <label key={l} className="text-xs text-muted-foreground">{l}<input defaultValue={v} className="mt-1.5 w-full rounded-md border border-border px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring" /></label>)}</div>
-            <div className="flex flex-wrap gap-2 border-t border-border p-4">{['Projector', 'PA System', 'Stage', 'Accessible'].map(n => <label key={n} className="flex items-center gap-2 rounded-full bg-secondary px-3 py-1.5 text-xs"><input type="checkbox" defaultChecked={n === 'PA System'} className="accent-foreground" />{n}</label>)}</div>
-            <div className="flex justify-end gap-2 border-t border-border p-4"><button className="rounded-full bg-secondary px-4 py-2 text-sm">Edit fields</button><button className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground">Submit booking</button></div>
+          {parsed && <div className="mt-6 rounded-lg border border-timetable-grid">
+            <div className="flex items-center justify-between border-b border-timetable-grid p-4"><div><p className="text-sm font-medium">Parsed booking request</p><p className="mt-1 text-xs text-muted-foreground">Review fields before submitting.</p></div><Confirmed /></div>
+            <div className="grid gap-4 p-4 sm:grid-cols-2">{[['Title', bookingText || 'Seminar Hall Request'], ['Attendance', '100 people'], ['Duration', '2 hours'], ['Day', 'Tomorrow'], ['Start', '18:00'], ['Requested room', 'Seminar Hall']].map(([l, v]) => <label key={l} className="text-xs text-muted-foreground">{l}<input defaultValue={v} className="mt-1.5 w-full rounded-md border border-timetable-grid px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring" /></label>)}</div>
+            <div className="flex flex-wrap gap-2 border-t border-timetable-grid p-4">{['Projector', 'PA System', 'Stage', 'Accessible'].map(n => <label key={n} className="flex items-center gap-2 rounded-full bg-secondary px-3 py-1.5 text-xs"><input type="checkbox" defaultChecked={n === 'PA System'} className="accent-foreground" />{n}</label>)}</div>
+            <div className="flex justify-end gap-2 border-t border-timetable-grid p-4"><button className="rounded-full bg-secondary px-4 py-2 text-sm">Edit fields</button><button className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground">Submit booking</button></div>
           </div>}
         </div>
       </Panel>
