@@ -749,60 +749,58 @@ export default function CampusManager() {
           })}
         </nav>
 
-        <p className="mt-8 mb-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-          Role & Permissions
-        </p>
-        <div className="rounded-xl border border-timetable-grid bg-card/60 p-3">
-          <div className="flex items-center gap-2">
-            <span className={`size-2 rounded-full ${
-              currentUser.role === 'ADMIN'
-                ? 'bg-emerald-500'
-                : currentUser.role === 'FACULTY'
-                ? 'bg-blue-500'
-                : currentUser.role === 'CLUB_LEAD'
-                ? 'bg-purple-500'
-                : 'bg-amber-500'
-            }`} />
-            <span className="text-xs font-bold text-foreground tracking-wide">
-              {currentUser.role}
-            </span>
-          </div>
-          <p className="text-[11px] text-muted-foreground mt-1 truncate">
-            {currentUser.department || 'Campus Community'}
-          </p>
-          <div className="mt-2.5 pt-2 border-t border-timetable-grid/50 flex items-center justify-between text-[10px] text-muted-foreground">
-            <span>Privileges:</span>
-            <span className="font-medium text-foreground">
-              {currentUser.role === 'ADMIN'
-                ? 'Full Administration'
-                : currentUser.role === 'FACULTY'
-                ? 'Faculty Scheduling'
-                : currentUser.role === 'CLUB_LEAD'
-                ? 'Club Booking Lead'
-                : 'Student Read-Only'}
-            </span>
-          </div>
-        </div>
-        <div className="mt-auto pt-6">
-          <button onClick={resetDemo} className="flex w-full items-center gap-3 rounded-full px-4 py-2 text-[13px] text-destructive hover:bg-card/50"><RotateCcw className="size-3.5" />Reset Demo Data</button>
+        <div className="mt-auto pt-6 flex flex-col gap-3">
+          <button onClick={resetDemo} className="flex w-full items-center gap-3 rounded-full px-4 py-2 text-[13px] text-destructive hover:bg-card/50 transition">
+            <RotateCcw className="size-3.5" />
+            Reset Demo Data
+          </button>
           
-          <div className="mt-5 flex items-center justify-between">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Account</p>
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-destructive transition"
-              title="Sign Out"
-            >
-              <LogOut className="size-3" /> Sign Out
-            </button>
-          </div>
-          <div className="mt-2 flex items-center gap-3 rounded-xl border border-timetable-grid bg-card/60 p-2.5">
-            <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-ink text-xs font-semibold text-ink-foreground">
-              {currentUser.full_name?.slice(0, 2).toUpperCase() || role.slice(0, 2).toUpperCase()}
+          {/* Consolidated, interactable user card */}
+          <div className="rounded-xl border border-timetable-grid bg-card/70 p-3 shadow-sm">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-ink text-xs font-bold text-ink-foreground shadow-sm">
+                  {currentUser.full_name?.slice(0, 2).toUpperCase() || 'CI'}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold truncate text-foreground leading-tight" title={currentUser.full_name || 'CIT Operations'}>
+                    {currentUser.full_name || 'CIT Operations'}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5" title={currentUser.email}>
+                    {currentUser.email || 'admin@cit.edu'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={handleLogout}
+                className="shrink-0 flex items-center gap-1 rounded-md border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-[11px] font-medium text-rose-600 hover:bg-rose-600 hover:text-white transition"
+                title="Sign Out"
+                aria-label="Sign Out"
+              >
+                <LogOut className="size-3" />
+                <span>Exit</span>
+              </button>
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold truncate text-foreground">{currentUser.full_name || 'CIT Operations'}</p>
-              <p className="text-[11px] text-muted-foreground truncate">{currentUser.email || role}</p>
+
+            <div className="mt-2.5 pt-2 border-t border-timetable-grid/50 flex items-center justify-between text-[10px]">
+              <div className="flex items-center gap-1.5">
+                <span className={`size-1.5 rounded-full ${
+                  currentUser.role === 'ADMIN'
+                    ? 'bg-emerald-500'
+                    : currentUser.role === 'FACULTY'
+                    ? 'bg-blue-500'
+                    : currentUser.role === 'CLUB_LEAD'
+                    ? 'bg-purple-500'
+                    : 'bg-amber-500'
+                }`} />
+                <span className="font-semibold text-foreground uppercase tracking-wider">
+                  {currentUser.role}
+                </span>
+              </div>
+              <span className="text-muted-foreground truncate max-w-[120px]" title={currentUser.department || 'Academic Affairs'}>
+                {currentUser.department || 'Academic Affairs'}
+              </span>
             </div>
           </div>
         </div>
@@ -843,28 +841,6 @@ export default function CampusManager() {
               <Moon className="size-3" />
               <span className={`absolute top-0.5 size-6 rounded-full bg-ev-mint shadow-sm transition-all ${dark ? 'left-7' : 'left-0.5'}`} />
             </button>
-
-            {/* Prominent User Badge & Sign Out Button */}
-            <div className="flex items-center gap-2 pl-2 border-l border-timetable-grid">
-              <div className="flex items-center gap-2 rounded-full border border-timetable-grid bg-secondary/60 py-1 pl-1 pr-3">
-                <div className="grid size-6 place-items-center rounded-full bg-ink text-[10px] font-bold text-ink-foreground">
-                  {currentUser.full_name?.slice(0, 2).toUpperCase() || 'AD'}
-                </div>
-                <div className="text-left hidden md:block">
-                  <p className="text-xs font-semibold leading-none truncate max-w-[120px]">{currentUser.full_name || 'Admin User'}</p>
-                  <p className="text-[10px] text-muted-foreground leading-none mt-0.5">{currentUser.role}</p>
-                </div>
-              </div>
-
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-600 hover:text-white transition shadow-sm"
-                title="Sign out of current account"
-              >
-                <LogOut className="size-3.5" />
-                <span>Sign Out</span>
-              </button>
-            </div>
           </div>
         </div>
         <div className="px-2 pt-6 pb-2 lg:px-4">
@@ -1217,7 +1193,7 @@ function Disruption({
                 className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition"
               >
                 <GitCompareArrows className="size-4" />
-                {preview ? 'Hide diff' : 'Preview disruption diff'}
+                {preview ? 'Hide diff' : 'Show changes'}
               </button>
             </div>
           </div>
@@ -1431,7 +1407,7 @@ function Disruption({
                 <p className="mt-1 text-xs text-muted-foreground">
                   {isCommitted
                     ? "Repaired schedule is live. Click 'Preview diff' to review reassignments."
-                    : "Click 'Preview disruption diff' to run live repair solver."}
+                    : "Click 'Show changes' to run live repair solver."}
                 </p>
               </div>
             </div>
