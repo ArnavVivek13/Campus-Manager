@@ -380,6 +380,12 @@ export default function CampusManager() {
   }
 
   const handlePreviewDisruption = async () => {
+    // If already showing preview, just toggle it off (don't re-fetch)
+    if (disruptionPreview) {
+      setDisruptionPreview(false)
+      return
+    }
+    // First time: fetch the simulation diff from backend
     try {
       const res = await fetch(`${API_BASE}/api/disruption/preview`, { method: 'POST' })
       if (res.ok) {
@@ -387,9 +393,9 @@ export default function CampusManager() {
         if (Array.isArray(data.changes) && data.changes.length > 0) {
           const mapped = data.changes.map((c: any) => [
             c.session_id,
-            c.session_id,
-            `Original: Room ${c.from?.room_id || 'LAB-1'}`,
-            `Reassigned: Room ${c.to?.room_id || 'LAB-2'}`
+            c.session_id + (c.change_type === 'new_session_added' ? ' (new)' : ''),
+            c.from ? `Original: ${c.from.day} P${c.from.start_period} · ${c.from.room_id}` : 'New session',
+            c.to ? `Moved to: ${c.to.day} P${c.to.start_period} · ${c.to.room_id}` : 'Unscheduled'
           ])
           setDisruptionMoves(mapped)
         }
@@ -855,7 +861,7 @@ function Disruption({
                 className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition"
               >
                 <GitCompareArrows className="size-4" />
-                {preview ? 'Re-run simulation' : 'Preview disruption diff'}
+                {preview ? 'Hide diff' : 'Preview disruption diff'}
               </button>
             </div>
           </div>
