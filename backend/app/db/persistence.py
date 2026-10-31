@@ -266,3 +266,4 @@ def load_schedule_from_db(db: Session, version_tag: str = "baseline") -> dict:
         },
         "exams": exams
     }
+

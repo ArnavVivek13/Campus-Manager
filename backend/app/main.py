@@ -44,9 +44,17 @@ app = FastAPI(
     description="Automated clash-free scheduling, exam planning, fest booking, disruption management, and RBAC authentication."
 )
 
+origins = [
+    os.getenv("FRONTEND_URL", "http://localhost:8080"),
+    "http://localhost:8080",
+    "http://localhost:5173",
+    "http://127.0.0.1:8080",
+    "http://127.0.0.1:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins if os.getenv("ENVIRONMENT") == "production" else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
