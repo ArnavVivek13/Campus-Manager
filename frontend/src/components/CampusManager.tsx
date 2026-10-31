@@ -124,25 +124,25 @@ const sessionDetail = (s: Session): Detail => ({
 })
 
 const bookingDetail = (r: string[]): Detail => ({
-  id: r[0],
+  id: r[0] ?? '',
   type: 'booking',
   kicker: 'Booking detail',
   title: r[1] ?? '',
   hueCls: hue[r[5] === 'Approved' ? 'mint' : r[5] === 'Rejected' ? 'rose' : 'peach'],
-  line1: `${r[0]} · ${r[5]}`,
+  line1: `${r[0] ?? ''} · ${r[5] ?? ''}`,
   line2: r[3] ?? '',
   fields: [['Requested by', r[2] ?? ''], ['Requested slot', r[3] ?? ''], ['Assigned venue', r[4] ?? ''], ['Status', r[5] ?? '']],
   note: r[5] === 'Approved' ? 'Approved after scoring against venue capacity, equipment needs, and clash checks.' : r[5] === 'Rejected' ? 'Rejected: no venue satisfies the capacity and equipment requirements for the requested slot.' : 'The requested slot clashes with an existing booking, so the closest available alternative was offered.',
 })
 
 const examDetail = (e: string[]): Detail => ({
-  id: e[2],
+  id: e[2] ?? '',
   type: 'exam',
   kicker: 'Exam detail',
   title: e[3] ?? '',
   hueCls: hue[e[1] === 'AM' ? 'sky' : 'violet'],
-  line1: `${e[2]} · ${e[1] === 'AM' ? 'Morning' : 'Afternoon'} session`,
-  line2: `${e[0]} · ${e[1] === 'AM' ? '09:30 – 11:30' : '14:00 – 16:00'}`,
+  line1: `${e[2] ?? ''} · ${e[1] === 'AM' ? 'Morning' : 'Afternoon'} session`,
+  line2: `${e[0] ?? ''} · ${e[1] === 'AM' ? '09:30 – 11:30' : '14:00 – 16:00'}`,
   fields: [['Code', e[2] ?? ''], ['Groups', e[4] ?? ''], ['Rooms', e[5] ?? ''], ['Session', e[1] === 'AM' ? 'Morning' : 'Afternoon']],
   note: 'Seating and invigilation are arranged so no student has two papers in the same slot, and room capacity covers all listed groups.',
 })
@@ -648,7 +648,7 @@ export default function CampusManager() {
         setActiveView('after_disruption')
         localStorage.setItem('active_view', 'after_disruption')
         setNotice('Schedule changes approved and committed to live semester timetable.')
-        fetchSchedule(selectedGroup, 'after_disruption')
+        fetchSchedule('group', selectedGroup, 'after_disruption')
         fetchDisruptionHistory()
         // Reset preview so the UI collapses back to the committed state banner
         setDisruptionPreview(false)
@@ -670,7 +670,7 @@ export default function CampusManager() {
         setActiveView('baseline')
         localStorage.setItem('active_view', 'baseline')
         setNotice('Disrupted changes reverted. Baseline timetable is now active.')
-        fetchSchedule(selectedGroup, 'baseline')
+        fetchSchedule('group', selectedGroup, 'baseline')
         fetchDisruptionHistory()
         // Collapse preview and clear state so UI resets cleanly
         setDisruptionPreview(false)
@@ -716,9 +716,9 @@ export default function CampusManager() {
   const handleApplyMoves = async () => {
     try {
       const decisionsList = disruptionMoves.map(m => {
-        const sid = m[0]
-        const defaultTarget = m[3].replace('Reassigned: Room ', '').replace('Reassigned: ', '').trim()
-        const dec = disruptionDecisions[sid] || { action: 'ACCEPT', room_id: defaultTarget }
+        const sid = m[0] ?? ''
+        const defaultTarget = (m[3] ?? '').replace('Reassigned: Room ', '').replace('Reassigned: ', '').trim()
+        const dec = (sid && disruptionDecisions[sid]) ? disruptionDecisions[sid] : { action: 'ACCEPT' as const, room_id: defaultTarget }
         return {
           session_id: sid,
           action: dec.action,
@@ -735,7 +735,7 @@ export default function CampusManager() {
         setActiveView('after_disruption')
         localStorage.setItem('active_view', 'after_disruption')
         setNotice(`Disruption moves committed (${data.summary}).`)
-        fetchSchedule(selectedGroup, 'after_disruption')
+        fetchSchedule('group', selectedGroup, 'after_disruption')
         fetchDisruptionHistory()
         // Collapse the preview cards after committing
         setDisruptionPreview(false)
@@ -754,7 +754,7 @@ export default function CampusManager() {
         setActiveView(data.active_view)
         localStorage.setItem('active_view', data.active_view)
         setNotice(data.message)
-        fetchSchedule(selectedGroup, data.active_view)
+        fetchSchedule('group', selectedGroup, data.active_view)
         fetchDisruptionHistory()
         // Reset preview state so the timetable reflects the rolled-back version
         setDisruptionPreview(false)
@@ -1453,7 +1453,7 @@ function Timetable({
       <div className="grid grid-cols-[72px_repeat(5,1fr)] border-b border-timetable-grid text-sm">
         <div className="border-r border-timetable-grid" />
         {days.map((d, i) => {
-          const dateInfo = weekDates[i]
+          const dateInfo = weekDates[i] ?? { date: 1, month: 'Jan' }
           const isToday = now?.day === i
           return (
             <div
@@ -1627,7 +1627,8 @@ function Disruption({
     let reassigned = 0
     let rejected = 0
     moves.forEach(m => {
-      const dec = decisions[m[0]]
+      const sid = m[0] ?? ''
+      const dec = sid ? decisions[sid] : undefined
       if (!dec || dec.action === 'ACCEPT') accepted++
       else if (dec.action === 'REASSIGN') reassigned++
       else if (dec.action === 'REJECT') rejected++
@@ -1711,9 +1712,9 @@ function Disruption({
               {/* Individual Move Cards */}
               <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                 {moves.map(m => {
-                  const sid = m[0]
+                  const sid = m[0] ?? ''
                   const proposedRoom = getProposedRoom(m)
-                  const dec = decisions[sid] || { action: 'ACCEPT', room_id: proposedRoom }
+                  const dec = (sid && decisions[sid]) ? decisions[sid] : { action: 'ACCEPT' as const, room_id: proposedRoom }
                   const currentRoom = dec.room_id || proposedRoom
 
                   return (
@@ -1762,7 +1763,7 @@ function Disruption({
                           {/* Accept */}
                           <button
                             type="button"
-                            onClick={() => onDecisionChange(sid, 'ACCEPT', proposedRoom)}
+                            onClick={() => sid && onDecisionChange(sid, 'ACCEPT', proposedRoom)}
                             className={`flex items-center justify-center gap-1 rounded py-1.5 text-xs transition ${
                               dec.action === 'ACCEPT'
                                 ? 'bg-emerald-600 text-white font-medium shadow-sm'
@@ -1777,7 +1778,7 @@ function Disruption({
                           {/* Reassign */}
                           <button
                             type="button"
-                            onClick={() => onDecisionChange(sid, 'REASSIGN', currentRoom)}
+                            onClick={() => sid && onDecisionChange(sid, 'REASSIGN', currentRoom)}
                             className={`flex items-center justify-center gap-1 rounded py-1.5 text-xs transition ${
                               dec.action === 'REASSIGN'
                                 ? 'bg-sky-600 text-white font-medium shadow-sm'
@@ -1792,7 +1793,7 @@ function Disruption({
                           {/* Reject */}
                           <button
                             type="button"
-                            onClick={() => onDecisionChange(sid, 'REJECT')}
+                            onClick={() => sid && onDecisionChange(sid, 'REJECT')}
                             className={`flex items-center justify-center gap-1 rounded py-1.5 text-xs transition ${
                               dec.action === 'REJECT'
                                 ? 'bg-rose-600 text-white font-medium shadow-sm'
@@ -1813,7 +1814,7 @@ function Disruption({
                             </label>
                             <select
                               value={currentRoom}
-                              onChange={(e) => onDecisionChange(sid, 'REASSIGN', e.target.value)}
+                              onChange={(e) => sid && onDecisionChange(sid, 'REASSIGN', e.target.value)}
                               className="w-full rounded border border-timetable-grid bg-background px-2 py-1 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ink"
                             >
                               {availableRooms.map((r) => (
