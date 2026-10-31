@@ -98,9 +98,12 @@ class DisruptionLog(Base):
     __tablename__ = "disruption_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    disruption_type = Column(String(50), nullable=False) # e.g. ROOM_CLOSURE
+    disruption_type = Column(String(50), nullable=False) # e.g. ROOM_CLOSURE, ROLLBACK
     affected_entity = Column(String(100), nullable=False) # e.g. LAB-1
+    action = Column(String(50), default="COMMIT") # COMMIT, ROLLBACK
+    summary = Column(String(255), nullable=True)
     moves_json = Column(Text, nullable=False)
+    schedule_snapshot_json = Column(Text, nullable=True)
     committed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 

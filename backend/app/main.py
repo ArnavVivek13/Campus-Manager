@@ -119,6 +119,17 @@ class BookingSubmission(BaseModel):
     mandatory_for_groups: List[str] = []
 
 
+class MoveDecision(BaseModel):
+    session_id: str
+    action: str = "ACCEPT"  # "ACCEPT", "REJECT", "REASSIGN"
+    room_id: Optional[str] = None
+
+
+class DisruptionDecisionPayload(BaseModel):
+    decisions: List[MoveDecision]
+    comment: Optional[str] = None
+
+
 # --- Routes ---
 
 @app.get("/")
@@ -303,10 +314,162 @@ def approve_disruption():
     }
 
 
+@app.post("/api/disruption/apply-moves")
+def apply_individual_disruption_moves(payload: DisruptionDecisionPayload, db: Session = Depends(get_db)):
+    """
+    Allows Admin to review and individually accept, reject, or reassign each disrupted session move.
+    Saves state snapshot into DisruptionLog for audit history and instant rollback.
+    """
+    if not STATE["schedule_after"]:
+        raise HTTPException(status_code=400, detail="No repaired schedule available. Run preview first.")
+
+    base_map = {s["session_id"]: copy.deepcopy(s) for s in STATE["baseline_schedule"]["sessions"]}
+    after_map = {s["session_id"]: s for s in STATE["schedule_after"]["sessions"]}
+
+    accepted_cnt = 0
+    reassigned_cnt = 0
+    rejected_cnt = 0
+    applied_moves = []
+
+    for d in payload.decisions:
+        sid = d.session_id
+        orig_entry = base_map.get(sid, {})
+        curr_entry = after_map.get(sid)
+
+        if d.action == "REJECT":
+            final_room = orig_entry.get("room_id", "ORIGINAL")
+            if curr_entry:
+                curr_entry["room_id"] = orig_entry.get("room_id", curr_entry.get("room_id", "ORIGINAL"))
+                final_room = curr_entry["room_id"]
+            rejected_cnt += 1
+            applied_moves.append({
+                "session_id": sid,
+                "action": "REJECT",
+                "final_room": final_room,
+                "note": "Reverted to original room"
+            })
+        elif d.action == "REASSIGN" and d.room_id:
+            if curr_entry:
+                curr_entry["room_id"] = d.room_id
+            reassigned_cnt += 1
+            applied_moves.append({
+                "session_id": sid,
+                "action": "REASSIGN",
+                "final_room": d.room_id,
+                "note": f"Admin manually assigned to {d.room_id}"
+            })
+        else: # ACCEPT
+            final_room = curr_entry.get("room_id") if curr_entry else (d.room_id or "ACCEPTED")
+            accepted_cnt += 1
+            applied_moves.append({
+                "session_id": sid,
+                "action": "ACCEPT",
+                "final_room": final_room,
+                "note": "Proposed repair accepted"
+            })
+
+    STATE["active_view"] = "after_disruption"
+
+    # Persist log in DB with full state snapshot
+    summary_text = f"Closure Review: {accepted_cnt} accepted, {reassigned_cnt} custom assigned, {rejected_cnt} rejected"
+    log = DisruptionLog(
+        disruption_type="SELECTIVE_COMMIT",
+        affected_entity="LAB-1",
+        action="COMMIT",
+        summary=summary_text,
+        moves_json=json.dumps(applied_moves),
+        schedule_snapshot_json=json.dumps(STATE["schedule_after"])
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+
+    return {
+        "status": "committed",
+        "log_id": log.id,
+        "active_view": STATE["active_view"],
+        "summary": summary_text,
+        "applied_moves": applied_moves
+    }
+
+
+@app.get("/api/disruption/history")
+def get_disruption_history(db: Session = Depends(get_db)):
+    """Returns chronological audit logs of all disruption decisions and state commits."""
+    logs = db.query(DisruptionLog).order_by(DisruptionLog.id.desc()).limit(20).all()
+    out = []
+    for l in logs:
+        moves = []
+        try:
+            moves = json.loads(l.moves_json) if l.moves_json else []
+        except:
+            pass
+        out.append({
+            "id": l.id,
+            "disruption_type": l.disruption_type,
+            "affected_entity": l.affected_entity,
+            "action": l.action or "COMMIT",
+            "summary": l.summary or f"{l.disruption_type} applied",
+            "moves_count": len(moves) if isinstance(moves, list) else 0,
+            "moves": moves,
+            "has_snapshot": bool(l.schedule_snapshot_json),
+            "created_at": l.created_at.strftime("%b %d, %Y · %H:%M:%S") if l.created_at else "Recently"
+        })
+    return {"history": out}
+
+
+@app.post("/api/disruption/rollback/{log_id}")
+def rollback_disruption(log_id: int, db: Session = Depends(get_db)):
+    """
+    Rolls back timetable state to an earlier historical disruption snapshot.
+    """
+    target_log = db.query(DisruptionLog).filter(DisruptionLog.id == log_id).first()
+    if not target_log:
+        raise HTTPException(status_code=404, detail=f"Log entry #{log_id} not found")
+
+    if target_log.schedule_snapshot_json:
+        STATE["schedule_after"] = json.loads(target_log.schedule_snapshot_json)
+        STATE["active_view"] = "after_disruption"
+    else:
+        STATE["active_view"] = "baseline"
+
+    # Record the rollback in audit history
+    new_log = DisruptionLog(
+        disruption_type="STATE_ROLLBACK",
+        affected_entity=target_log.affected_entity or "SCHEDULE",
+        action="ROLLBACK",
+        summary=f"Rolled back state to Log #{log_id} ({target_log.summary or 'snapshot'})",
+        moves_json=json.dumps([{"rollback_to_log_id": log_id}]),
+        schedule_snapshot_json=json.dumps(STATE["schedule_after"] if STATE["active_view"] == "after_disruption" else STATE["schedule"])
+    )
+    db.add(new_log)
+    db.commit()
+
+    return {
+        "status": "rolled_back",
+        "restored_log_id": log_id,
+        "active_view": STATE["active_view"],
+        "message": f"Successfully rolled back schedule state to Version #{log_id}."
+    }
+
+
 @app.post("/api/disruption/revert")
-def revert_disruption():
+def revert_disruption(db: Session = Depends(get_db)):
     """Admin reverts active timetable back to clean baseline schedule."""
     STATE["active_view"] = "baseline"
+    try:
+        new_log = DisruptionLog(
+            disruption_type="REVERT_TO_BASELINE",
+            affected_entity="SCHEDULE",
+            action="REVERT",
+            summary="Reverted timetable to clean baseline schedule",
+            moves_json="[]",
+            schedule_snapshot_json=json.dumps(STATE["schedule"])
+        )
+        db.add(new_log)
+        db.commit()
+    except Exception:
+        pass
     return {
         "status": "reverted",
         "active_view": STATE["active_view"],

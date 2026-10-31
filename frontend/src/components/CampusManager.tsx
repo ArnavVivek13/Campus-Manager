@@ -1,6 +1,6 @@
 import React from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Bot, CalendarDays, Check, ChevronRight, CircleCheck, Clock3, Command, DoorOpen, GitCompareArrows, GraduationCap, MessageSquareText, MoreHorizontal, PanelLeft, Pencil, RotateCcw, Send, SlidersHorizontal, Sparkles, Users, X, Menu, Moon, Sun, Loader2 } from 'lucide-react'
+import { AlertTriangle, Bot, CalendarDays, Check, ChevronRight, CircleCheck, Clock3, Command, DoorOpen, GitCompareArrows, GraduationCap, MessageSquareText, MoreHorizontal, PanelLeft, Pencil, RotateCcw, Send, SlidersHorizontal, Sparkles, Users, X, Menu, Moon, Sun, Loader2, History, CheckCircle2, XCircle, ArrowRight } from 'lucide-react'
 
 const API_BASE = 'http://127.0.0.1:8000'
 
@@ -164,6 +164,11 @@ export default function CampusManager() {
     ['0', 'Inversions', 'sky'],
   ])
   const [disruptionMoves, setDisruptionMoves] = useState<string[][]>(defaultMoves)
+  const [disruptionDecisions, setDisruptionDecisions] = useState<Record<string, { action: 'ACCEPT' | 'REJECT' | 'REASSIGN'; room_id: string }>>({})
+  const [disruptionHistory, setDisruptionHistory] = useState<any[]>([])
+  const [availableRooms, setAvailableRooms] = useState<string[]>([
+    'LAB-2', 'LAB-3', 'CR-104', 'LH-1', 'LH-2', 'LH-3', 'AUD', 'SEM-HALL'
+  ])
   const [availableGroups, setAvailableGroups] = useState<string[]>(['CSE-2', 'All', 'Y1-A', 'Y1-B', 'Y1-C', 'Y1-D', 'CSE-3', 'ECE-2'])
   const [selectedGroup, setSelectedGroup] = useState<string>('CSE-2')
   const [venuesList, setVenuesList] = useState<[string, string, string][]>([
@@ -233,6 +238,10 @@ export default function CampusManager() {
           r.id === 'LH-1' ? 'Booked 18:00' : 'Available'
         ])
         setVenuesList(venues)
+        const roomIds = data.rooms.map((r: any) => r.id)
+        if (roomIds.length > 0) {
+          setAvailableRooms(roomIds)
+        }
       }
     } catch {}
   }
@@ -298,6 +307,7 @@ export default function CampusManager() {
     fetchSchedule(selectedGroup)
     fetchExams()
     fetchBookings()
+    fetchDisruptionHistory()
   }, [])
 
   // Refetch when group filter or disruption view toggles
@@ -414,12 +424,83 @@ export default function CampusManager() {
         localStorage.setItem('active_view', 'baseline')
         setNotice('Disrupted changes reverted. Baseline timetable is now active.')
         fetchSchedule(selectedGroup, 'baseline')
+        fetchDisruptionHistory()
       }
     } catch {
       setActiveView('baseline')
       localStorage.setItem('active_view', 'baseline')
       setNotice('Disrupted changes reverted to baseline.')
+      fetchDisruptionHistory()
     }
+  }
+
+  const handleDecisionChange = (sessionId: string, action: 'ACCEPT' | 'REJECT' | 'REASSIGN', roomId?: string) => {
+    setDisruptionDecisions(prev => {
+      const existing = prev[sessionId]
+      return {
+        ...prev,
+        [sessionId]: {
+          action,
+          room_id: roomId !== undefined ? roomId : (existing?.room_id || 'LAB-2')
+        }
+      }
+    })
+  }
+
+  const fetchDisruptionHistory = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/disruption/history`)
+      if (res.ok) {
+        const data = await res.json()
+        if (Array.isArray(data.history)) {
+          setDisruptionHistory(data.history)
+        }
+      }
+    } catch {}
+  }
+
+  const handleApplyMoves = async () => {
+    try {
+      const decisionsList = disruptionMoves.map(m => {
+        const sid = m[0]
+        const defaultTarget = m[3].replace('Reassigned: Room ', '').replace('Reassigned: ', '').trim()
+        const dec = disruptionDecisions[sid] || { action: 'ACCEPT', room_id: defaultTarget }
+        return {
+          session_id: sid,
+          action: dec.action,
+          room_id: dec.room_id || defaultTarget
+        }
+      })
+      const res = await fetch(`${API_BASE}/api/disruption/apply-moves`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decisions: decisionsList })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setActiveView('after_disruption')
+        localStorage.setItem('active_view', 'after_disruption')
+        setNotice(`Disruption moves committed (${data.summary}).`)
+        fetchSchedule(selectedGroup, 'after_disruption')
+        fetchDisruptionHistory()
+      }
+    } catch {
+      handleApproveDisruption()
+    }
+  }
+
+  const handleRollback = async (logId: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/disruption/rollback/${logId}`, { method: 'POST' })
+      if (res.ok) {
+        const data = await res.json()
+        setActiveView(data.active_view)
+        localStorage.setItem('active_view', data.active_view)
+        setNotice(data.message)
+        fetchSchedule(selectedGroup, data.active_view)
+        fetchDisruptionHistory()
+      }
+    } catch {}
   }
 
   const handleAskAiExplain = async () => {
@@ -495,7 +576,22 @@ export default function CampusManager() {
           {activeTab === 0 && <Timetable sessionsList={sessionsList} availableGroups={availableGroups} selectedGroup={selectedGroup} onSelectGroup={setSelectedGroup} onSelect={s => setSelected(sessionDetail(s))} />}
           {activeTab === 1 && <Fest rows={visibleBookings} stats={festStats} filter={statusFilter} setFilter={setStatusFilter} onSelect={r => setSelected(bookingDetail(r))} />}
           {activeTab === 2 && <ExamGrid list={examsList} onSelect={e => setSelected(examDetail(e))} />}
-          {activeTab === 3 && <Disruption preview={disruptionPreview} moves={disruptionMoves} isCommitted={activeView === 'after_disruption'} onPreview={handlePreviewDisruption} onApprove={handleApproveDisruption} onRevert={handleRevertDisruption} />}
+          {activeTab === 3 && (
+            <Disruption
+              preview={disruptionPreview}
+              moves={disruptionMoves}
+              isCommitted={activeView === 'after_disruption'}
+              onPreview={handlePreviewDisruption}
+              onApprove={handleApproveDisruption}
+              onRevert={handleRevertDisruption}
+              decisions={disruptionDecisions}
+              onDecisionChange={handleDecisionChange}
+              onApplyMoves={handleApplyMoves}
+              history={disruptionHistory}
+              onRollback={handleRollback}
+              availableRooms={availableRooms}
+            />
+          )}
           {activeTab === 4 && <Assistant bookingText={bookingText} setBookingText={setBookingText} parsed={parsed} parsedData={parsedData} submitBooking={submitBooking} confirmBooking={confirmBookingDb} venuesList={venuesList} />}
         </div>
       </div>
@@ -633,7 +729,13 @@ function Disruption({
   isCommitted,
   onPreview,
   onApprove,
-  onRevert
+  onRevert,
+  decisions,
+  onDecisionChange,
+  onApplyMoves,
+  history,
+  onRollback,
+  availableRooms
 }: {
   preview: boolean
   moves: string[][]
@@ -641,59 +743,385 @@ function Disruption({
   onPreview: () => void
   onApprove: () => void
   onRevert: () => void
+  decisions: Record<string, { action: 'ACCEPT' | 'REJECT' | 'REASSIGN'; room_id: string }>
+  onDecisionChange: (sessionId: string, action: 'ACCEPT' | 'REJECT' | 'REASSIGN', roomId?: string) => void
+  onApplyMoves: () => void
+  history: any[]
+  onRollback: (logId: number) => void
+  availableRooms: string[]
 }) {
-  return <div>
-    <Heading title="Disruption Studio"><Pill active={!preview} onClick={onPreview}>Simulation</Pill><Pill active={preview} onClick={onPreview}>Preview diff</Pill></Heading>
-    <div className={`flex flex-wrap items-center justify-between gap-4 rounded-none border border-timetable-grid p-5 ${hue.periwinkle}`}>
-      <div>
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-medium">Simulate or apply campus disruptions</p>
-          {isCommitted && <span className="rounded-full bg-success px-2.5 py-0.5 text-[11px] font-semibold text-white">✓ Committed & Live</span>}
-        </div>
-        <p className="mt-1 text-[13px] opacity-75">Faculty leave, room closure, and extra sessions. Active closure: LAB-1.</p>
-      </div>
-      <div className="flex items-center gap-2">
-        <button onClick={onPreview} className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground"><GitCompareArrows className="size-4" />Preview disruption diff</button>
-      </div>
-    </div>
-    {preview ? <>
-      <div className="mt-5 flex flex-wrap gap-2 text-xs">
-        <span className="rounded-full bg-secondary px-3 py-1.5">{moves.length} sessions moved</span>
-        <span className="rounded-full bg-secondary px-3 py-1.5">0 time changes</span>
-        <span className="rounded-full bg-secondary px-3 py-1.5">{moves.length} room-only</span>
-        {isCommitted && <span className="rounded-full bg-success/20 px-3 py-1.5 text-success font-medium">Currently active on timetable</span>}
-      </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-3">{moves.map(m => <div key={m[0]} className={`rounded-none border border-timetable-grid p-4 ${hue.sky}`}>
-        <div className="flex items-start justify-between"><p className="text-sm font-medium">{m[1]}</p><MoreHorizontal className="size-4 shrink-0" /></div>
-        <p className="mt-3 text-xs line-through opacity-60">{m[2]}</p><p className="mt-1 text-[13px]">{m[3]}</p>
-        <span className="mt-4 inline-flex items-center gap-1 text-[11px] font-medium opacity-80"><GitCompareArrows className="size-3" />Room reassigned</span>
-      </div>)}</div>
-      {isCommitted ? (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-none border border-timetable-grid bg-success-soft p-4">
-          <div className="flex items-start gap-2 text-[13px] text-success">
-            <Check className="mt-0.5 size-4 shrink-0" />
-            <span>Repaired timetable is actively deployed on campus. All 3 LAB-1 sessions are relocated to LAB-2 and LAB-3.</span>
+  const [activeSubTab, setActiveSubTab] = useState<'simulation' | 'history'>('simulation')
+
+  // Helper to extract default proposed room from move string
+  const getProposedRoom = (m: string[]) => {
+    const match = m[3]?.match(/Room\s+([A-Za-z0-9-]+)|·\s*([A-Za-z0-9-]+)/)
+    return match ? (match[1] || match[2]) : 'LAB-2'
+  }
+
+  // Count decisions
+  const stats = useMemo(() => {
+    let accepted = 0
+    let reassigned = 0
+    let rejected = 0
+    moves.forEach(m => {
+      const dec = decisions[m[0]]
+      if (!dec || dec.action === 'ACCEPT') accepted++
+      else if (dec.action === 'REASSIGN') reassigned++
+      else if (dec.action === 'REJECT') rejected++
+    })
+    return { accepted, reassigned, rejected }
+  }, [moves, decisions])
+
+  return (
+    <div>
+      <Heading title="Disruption Studio">
+        <Pill active={activeSubTab === 'simulation'} onClick={() => setActiveSubTab('simulation')}>
+          Simulation & Review
+        </Pill>
+        <Pill active={activeSubTab === 'history'} onClick={() => setActiveSubTab('history')}>
+          Audit History & Rollback {history.length > 0 ? `(${history.length})` : ''}
+        </Pill>
+      </Heading>
+
+      {activeSubTab === 'simulation' ? (
+        <>
+          <div className={`flex flex-wrap items-center justify-between gap-4 rounded-none border border-timetable-grid p-5 ${hue.periwinkle}`}>
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium">Simulate or apply campus disruptions</p>
+                {isCommitted ? (
+                  <span className="rounded-full bg-success px-2.5 py-0.5 text-[11px] font-semibold text-white">
+                    ✓ Committed & Live
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-card px-2.5 py-0.5 text-[11px] font-medium text-foreground/80 border border-timetable-grid">
+                    Draft Simulation
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-[13px] opacity-75">
+                Faculty leave, room closure, and extra sessions. Active closure: LAB-1.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onPreview}
+                className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition"
+              >
+                <GitCompareArrows className="size-4" />
+                {preview ? 'Re-run simulation' : 'Preview disruption diff'}
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="rounded-full bg-success px-3.5 py-1.5 text-xs font-semibold text-white">Committed</span>
-            <button onClick={onRevert} className="rounded-full border border-timetable-grid bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary">
-              Revert to Baseline Schedule
-            </button>
-          </div>
-        </div>
+
+          {preview ? (
+            <>
+              {/* Summary counters */}
+              <div className="mt-5 flex flex-wrap items-center gap-2 text-xs">
+                <span className="rounded-full bg-secondary px-3 py-1.5 font-medium">{moves.length} sessions moved</span>
+                <span className="rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-3 py-1.5 font-medium">
+                  {stats.accepted} accepted
+                </span>
+                <span className="rounded-full bg-sky-500/10 text-sky-600 border border-sky-500/20 px-3 py-1.5 font-medium">
+                  {stats.reassigned} reassigned
+                </span>
+                <span className="rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/20 px-3 py-1.5 font-medium">
+                  {stats.rejected} rejected
+                </span>
+                {isCommitted && (
+                  <span className="rounded-full bg-success/20 px-3 py-1.5 text-success font-medium">
+                    Currently active on timetable
+                  </span>
+                )}
+              </div>
+
+              {/* Individual Move Cards */}
+              <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                {moves.map(m => {
+                  const sid = m[0]
+                  const proposedRoom = getProposedRoom(m)
+                  const dec = decisions[sid] || { action: 'ACCEPT', room_id: proposedRoom }
+                  const currentRoom = dec.room_id || proposedRoom
+
+                  return (
+                    <div
+                      key={sid}
+                      className={`flex flex-col justify-between rounded-none border border-timetable-grid p-4 transition ${
+                        dec.action === 'ACCEPT'
+                          ? `${hue.sky} ring-1 ring-emerald-500/30`
+                          : dec.action === 'REASSIGN'
+                          ? `${hue.violet} ring-1 ring-sky-500/30`
+                          : 'bg-muted/70 opacity-80 ring-1 ring-rose-500/30'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="text-[10px] font-mono tracking-wide uppercase opacity-70">
+                              {sid}
+                            </span>
+                            <p className="text-sm font-medium">{m[1]}</p>
+                          </div>
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                              dec.action === 'ACCEPT'
+                                ? 'bg-emerald-600 text-white'
+                                : dec.action === 'REASSIGN'
+                                ? 'bg-sky-600 text-white'
+                                : 'bg-rose-600 text-white'
+                            }`}
+                          >
+                            {dec.action}
+                          </span>
+                        </div>
+
+                        {/* Strikethrough original and proposed */}
+                        <div className="mt-3 text-xs">
+                          <p className="line-through opacity-60">{m[2]}</p>
+                          <p className="mt-1 font-medium">{m[3]}</p>
+                        </div>
+                      </div>
+
+                      {/* Decision Controls */}
+                      <div className="mt-4 pt-3 border-t border-timetable-grid/60">
+                        <p className="text-[11px] font-medium opacity-80 mb-2">Individual Action:</p>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {/* Accept */}
+                          <button
+                            type="button"
+                            onClick={() => onDecisionChange(sid, 'ACCEPT', proposedRoom)}
+                            className={`flex items-center justify-center gap-1 rounded py-1.5 text-xs transition ${
+                              dec.action === 'ACCEPT'
+                                ? 'bg-emerald-600 text-white font-medium shadow-sm'
+                                : 'bg-card/70 border border-timetable-grid text-foreground/80 hover:bg-card'
+                            }`}
+                            title="Accept recommended room"
+                          >
+                            <CheckCircle2 className="size-3" />
+                            Accept
+                          </button>
+
+                          {/* Reassign */}
+                          <button
+                            type="button"
+                            onClick={() => onDecisionChange(sid, 'REASSIGN', currentRoom)}
+                            className={`flex items-center justify-center gap-1 rounded py-1.5 text-xs transition ${
+                              dec.action === 'REASSIGN'
+                                ? 'bg-sky-600 text-white font-medium shadow-sm'
+                                : 'bg-card/70 border border-timetable-grid text-foreground/80 hover:bg-card'
+                            }`}
+                            title="Reassign to custom room"
+                          >
+                            <ArrowRight className="size-3" />
+                            Reassign
+                          </button>
+
+                          {/* Reject */}
+                          <button
+                            type="button"
+                            onClick={() => onDecisionChange(sid, 'REJECT')}
+                            className={`flex items-center justify-center gap-1 rounded py-1.5 text-xs transition ${
+                              dec.action === 'REJECT'
+                                ? 'bg-rose-600 text-white font-medium shadow-sm'
+                                : 'bg-card/70 border border-timetable-grid text-foreground/80 hover:bg-card'
+                            }`}
+                            title="Reject relocation (keep original room)"
+                          >
+                            <XCircle className="size-3" />
+                            Reject
+                          </button>
+                        </div>
+
+                        {/* If Reassign is chosen, show room picker */}
+                        {dec.action === 'REASSIGN' && (
+                          <div className="mt-3 rounded bg-card/90 p-2 border border-timetable-grid">
+                            <label className="block text-[11px] font-medium text-foreground/80 mb-1">
+                              Override Venue:
+                            </label>
+                            <select
+                              value={currentRoom}
+                              onChange={(e) => onDecisionChange(sid, 'REASSIGN', e.target.value)}
+                              className="w-full rounded border border-timetable-grid bg-background px-2 py-1 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ink"
+                            >
+                              {availableRooms.map((r) => (
+                                <option key={r} value={r}>
+                                  {r}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {/* Status message */}
+                        <div className="mt-2 text-[11px] opacity-75">
+                          {dec.action === 'ACCEPT' && `Moving to suggested: ${proposedRoom}`}
+                          {dec.action === 'REASSIGN' && `Overriding destination: ${currentRoom}`}
+                          {dec.action === 'REJECT' && `Keeps baseline assignment`}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Bottom Action Footer */}
+              {isCommitted ? (
+                <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-none border border-timetable-grid bg-success-soft p-4">
+                  <div className="flex items-start gap-2 text-[13px] text-success">
+                    <Check className="mt-0.5 size-4 shrink-0" />
+                    <span>Repaired timetable is actively deployed on campus. You can adjust individual decisions and re-commit, or revert back to baseline.</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={onApplyMoves}
+                      className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition"
+                    >
+                      Update & Re-commit Decisions
+                    </button>
+                    <button
+                      onClick={onRevert}
+                      className="rounded-full border border-timetable-grid bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition"
+                    >
+                      Revert to Baseline Schedule
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-none border border-timetable-grid bg-warning-soft p-4">
+                  <div className="flex items-start gap-2 text-[13px] text-warning">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    <span>Review decisions above. Commit reviewed moves individually or accept all proposed repairs.</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={onApplyMoves}
+                      className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition"
+                    >
+                      Commit Reviewed Decisions
+                    </button>
+                    <button
+                      onClick={onApprove}
+                      className="rounded-full border border-timetable-grid bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition"
+                    >
+                      Accept All & Commit
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="mt-5 grid min-h-56 place-items-center rounded-none border border-dashed border-timetable-grid text-center">
+              <div>
+                <SlidersHorizontal className="mx-auto size-6 text-muted-foreground" />
+                <p className="mt-3 text-sm font-medium">Simulation is ready</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {isCommitted
+                    ? "Repaired schedule is live. Click 'Preview diff' to review reassignments."
+                    : "Click 'Preview disruption diff' to run live repair solver."}
+                </p>
+              </div>
+            </div>
+          )}
+        </>
       ) : (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-none border border-timetable-grid bg-warning-soft p-4">
-          <div className="flex items-start gap-2 text-[13px] text-warning">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            <span>All proposed room moves preserve capacity and equipment requirements.</span>
+        /* Audit History & Rollback Tab */
+        <div className="mt-4">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-none border border-timetable-grid p-4 bg-muted/30">
+            <div>
+              <p className="text-sm font-medium">Disruption State Audit Trail</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Every disruption approval, individual decision commit, and rollback is versioned. Restore any historical state with a single click.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="rounded-full bg-secondary px-3 py-1 font-medium">
+                {history.length} Saved {history.length === 1 ? 'Snapshot' : 'Snapshots'}
+              </span>
+            </div>
           </div>
-          <button onClick={onApprove} className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground">
-            Approve & commit
-          </button>
+
+          {history.length === 0 ? (
+            <div className="grid min-h-56 place-items-center rounded-none border border-dashed border-timetable-grid p-8 text-center">
+              <div>
+                <History className="mx-auto size-6 text-muted-foreground" />
+                <p className="mt-3 text-sm font-medium">No disruption history recorded yet</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Commit changes in the simulation tab to generate an audit log entry.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {history.map((item: any) => {
+                const actionBadgeClass =
+                  item.action === 'COMMIT_ALL'
+                    ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+                    : item.action === 'INDIVIDUAL_MOVES'
+                    ? 'bg-sky-500/10 text-sky-600 border-sky-500/20'
+                    : item.action === 'ROLLBACK'
+                    ? 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+                    : 'bg-purple-500/10 text-purple-600 border-purple-500/20'
+
+                const formattedTime = item.created_at
+                  ? new Date(item.created_at).toLocaleString([], {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit'
+                    })
+                  : 'Recent'
+
+                return (
+                  <div
+                    key={item.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-none border border-timetable-grid bg-card p-4 hover:border-foreground/30 transition"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-semibold text-muted-foreground">
+                          #LOG-{item.id}
+                        </span>
+                        <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${actionBadgeClass}`}>
+                          {item.action || item.disruption_type}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {formattedTime}
+                        </span>
+                      </div>
+                      <p className="text-sm font-medium text-foreground">
+                        {item.summary || item.notes || `Disruption event on ${item.affected_entity}`}
+                      </p>
+                      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                        <span>Entity: {item.affected_entity || 'SCHEDULE'}</span>
+                        {item.has_snapshot && (
+                          <>
+                            <span>·</span>
+                            <span className="text-emerald-600 font-medium">Schedule snapshot preserved</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => onRollback(item.id)}
+                        className="flex items-center gap-1.5 rounded-full border border-timetable-grid bg-secondary px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-ink hover:text-ink-foreground transition"
+                      >
+                        <History className="size-3.5" />
+                        Rollback to this state
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
-    </> : <div className="mt-5 grid min-h-56 place-items-center rounded-none border border-dashed border-timetable-grid text-center"><div><SlidersHorizontal className="mx-auto size-6 text-muted-foreground" /><p className="mt-3 text-sm font-medium">Simulation is ready</p><p className="mt-1 text-xs text-muted-foreground">{isCommitted ? "Repaired schedule is live. Click 'Preview diff' to review reassignments." : "Click 'Preview disruption diff' to run live repair solver."}</p></div></div>}
-  </div>
+    </div>
+  )
 }
 
 function Assistant({
