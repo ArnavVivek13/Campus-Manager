@@ -691,7 +691,7 @@ export default function CampusManager() {
   return <main className="min-h-screen bg-canvas p-3 text-foreground lg:p-6">
     <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-[1600px] gap-3 rounded-md grad-shell p-3">
       {menuOpen && <div className="fixed inset-0 z-30 bg-foreground/30 lg:hidden" onClick={() => setMenuOpen(false)} />}
-      <aside className={`${menuOpen ? 'fixed inset-y-0 left-0 z-40 flex grad-shell shadow-2xl overflow-y-auto' : 'hidden'} w-64 shrink-0 flex-col px-4 py-4 lg:static lg:z-auto lg:flex lg:shadow-none`}>
+      <aside className={`${menuOpen ? 'fixed inset-y-0 left-0 z-40 flex grad-shell shadow-2xl overflow-y-auto' : 'hidden'} w-64 shrink-0 flex-col px-4 py-4 lg:static lg:z-auto lg:flex lg:shadow-none overflow-y-auto max-h-[calc(100vh-3rem)]`}>
         <div className="flex items-center justify-between">
           <div className="grid size-10 place-items-center rounded-lg bg-ink text-[11px] font-bold text-ink-foreground">CIT</div>
           <button onClick={() => setMenuOpen(false)} aria-label="Close menu" className="lg:pointer-events-none"><PanelLeft className="size-5 text-foreground/70" /></button>
@@ -783,9 +783,63 @@ export default function CampusManager() {
       </aside>
 
       <div className="min-w-0 flex-1 rounded-lg bg-card p-3 lg:p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-timetable-grid px-5 py-4 text-sm">
-          <div className="flex items-center gap-2"><button onClick={() => setMenuOpen(true)} aria-label="Open menu" className="-ml-1 rounded-full p-1.5 hover:bg-accent lg:hidden"><Menu className="size-5" /></button><span className="text-muted-foreground">CIT Campus</span><ChevronRight className="size-3.5 text-muted-foreground" /><Clock3 className="size-4" /><span className="font-medium">{tabs[activeTab]}</span></div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground"><span className="size-1.5 rounded-full bg-success" />Clash-free · 0 hard violations {activeView === 'after_disruption' && <span className="ml-2 rounded-full bg-warning-soft px-2 py-0.5 text-warning font-medium">Repaired View</span>}<button role="switch" aria-checked={dark} aria-label="Toggle dark mode" onClick={() => setDark(d => !d)} className="relative ml-3 flex h-8 w-16 items-center justify-between rounded-full bg-secondary px-2 text-muted-foreground"><Sun className="size-3.5" /><Moon className="size-3.5" /><span className={`absolute top-1 size-6 rounded-full bg-ev-mint shadow-sm transition-all ${dark ? 'left-9' : 'left-1'}`} /></button></div>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-timetable-grid px-4 py-2.5 text-sm">
+          <div className="flex items-center gap-2">
+            <button onClick={() => setMenuOpen(true)} aria-label="Open menu" className="-ml-1 rounded-full p-1.5 hover:bg-accent lg:hidden">
+              <Menu className="size-5" />
+            </button>
+            <span className="text-muted-foreground">CIT Campus</span>
+            <ChevronRight className="size-3.5 text-muted-foreground" />
+            <Clock3 className="size-4" />
+            <span className="font-medium">{tabs[activeTab]}</span>
+          </div>
+
+          <div className="flex items-center gap-2.5 text-xs">
+            <span className="hidden sm:inline-flex items-center gap-1 text-muted-foreground">
+              <span className="size-1.5 rounded-full bg-success" />
+              Clash-free · 0 hard violations
+            </span>
+            {activeView === 'after_disruption' && (
+              <span className="rounded-full bg-warning-soft px-2 py-0.5 text-warning font-medium">
+                Repaired View
+              </span>
+            )}
+
+            {/* Dark mode switch */}
+            <button
+              role="switch"
+              aria-checked={dark}
+              aria-label="Toggle dark mode"
+              onClick={() => setDark(d => !d)}
+              className="relative flex h-7 w-14 items-center justify-between rounded-full bg-secondary px-1.5 text-muted-foreground"
+            >
+              <Sun className="size-3" />
+              <Moon className="size-3" />
+              <span className={`absolute top-0.5 size-6 rounded-full bg-ev-mint shadow-sm transition-all ${dark ? 'left-7' : 'left-0.5'}`} />
+            </button>
+
+            {/* Prominent User Badge & Sign Out Button */}
+            <div className="flex items-center gap-2 pl-2 border-l border-timetable-grid">
+              <div className="flex items-center gap-2 rounded-full border border-timetable-grid bg-secondary/60 py-1 pl-1 pr-3">
+                <div className="grid size-6 place-items-center rounded-full bg-ink text-[10px] font-bold text-ink-foreground">
+                  {currentUser.full_name?.slice(0, 2).toUpperCase() || 'AD'}
+                </div>
+                <div className="text-left hidden md:block">
+                  <p className="text-xs font-semibold leading-none truncate max-w-[120px]">{currentUser.full_name || 'Admin User'}</p>
+                  <p className="text-[10px] text-muted-foreground leading-none mt-0.5">{currentUser.role}</p>
+                </div>
+              </div>
+
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-600 hover:text-white transition shadow-sm"
+                title="Sign out of current account"
+              >
+                <LogOut className="size-3.5" />
+                <span>Sign Out</span>
+              </button>
+            </div>
+          </div>
         </div>
         <div className="px-2 pt-6 pb-2 lg:px-4">
           {notice && <div className="mb-5 flex items-center justify-between rounded-lg bg-success-soft px-4 py-3 text-xs text-success"><span><Check className="mr-2 inline size-3.5" />{notice}</span><button onClick={() => setNotice('')} aria-label="Dismiss"><X className="size-4" /></button></div>}
