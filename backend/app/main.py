@@ -302,8 +302,11 @@ def get_exams():
 
 
 @app.get("/api/fest/bookings")
-def get_fest_bookings():
-    """Returns Spectra week booking requests and decisions."""
+def get_fest_bookings(db: Session = Depends(get_db)):
+    """
+    Returns Spectra week booking requests and decisions, merged with
+    custom bookings submitted via the AI Assistant / DB booking route.
+    """
     sched = STATE.get("schedule")
     if not sched or not STATE.get("data"):
         return {"bookings": [], "session_overrides": []}
@@ -328,6 +331,31 @@ def get_fest_bookings():
             "room_id": d.get("room_id"),
             "reason": "Cancelled by requester" if is_cancelled else d.get("reason", "")
         })
+
+    # Include newly submitted database bookings from AI Assistant
+    try:
+        custom_db_bookings = db.query(BookingModel).all()
+        for cb in custom_db_bookings:
+            if cb.id not in req_map:
+                enriched.insert(0, {
+                    "request": {
+                        "id": cb.id,
+                        "title": cb.event_name,
+                        "requester": cb.requester or cb.club_name,
+                        "role": cb.role or "club",
+                        "attendance": cb.attendance,
+                        "duration_periods": cb.duration_periods or 1,
+                        "windows": [{"day": cb.assigned_day or "WED", "from_period": cb.assigned_start_period or 10, "to_period": cb.assigned_end_period or 11}],
+                    },
+                    "status": cb.status.lower() if cb.status else "pending",
+                    "day": cb.assigned_day or "WED",
+                    "start_period": cb.assigned_start_period or 10,
+                    "end_period": cb.assigned_end_period or 11,
+                    "room_id": cb.assigned_venue if cb.assigned_venue != "—" else None,
+                    "reason": cb.reason or "Submitted via AI Booking Assistant"
+                })
+    except Exception:
+        pass
 
     return {
         "bookings": enriched,
