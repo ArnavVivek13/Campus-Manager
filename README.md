@@ -52,11 +52,11 @@ flowchart TD
 | :--- | :--- | :--- |
 | **`schedule.json` Hard Violations** | **0** (`{}`) | **25 / 25 Marks** |
 | **`schedule.json` Soft Penalty** | **3** (`S1: 0, S2: 0, S3: 0, S4: 3, S5: 0, S6: 0`) | Top-Tier Optimization |
-| **Spectra Fest Booking Score** | **63.0 / 70** (20 Approved, 3 Alternatives, 2 Rejected) | **0 Priority Inversions** |
+| **Spectra Fest Booking Score** | **65.5 / 70** (21 Approved, 2 Alternatives, 2 Rejected) | **0 Priority Inversions** |
 | **Midsem Exams Hard Violations** | **0** | All 41 exams scheduled |
 | **Exam Soft Penalty** | **0** | No students have 2 exams on the same day |
 | **`schedule_after.json` Hard Violations** | **0** | **Full 6/6 Marks** |
-| **Disruption Stability** | **17 moved** (1 time changed, 16 room-only) | **Theoretical Minimum** (all 17 were directly affected) |
+| **Disruption Stability** | **13 moved** (1 time changed, 12 room-only) | **Minimal-Perturbation Stability** |
 
 ---
 
