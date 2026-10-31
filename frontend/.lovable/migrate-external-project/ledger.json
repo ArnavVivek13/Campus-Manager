@@ -1,0 +1,4 @@
+[{"capability":"code","source":"Next.js single page (app/page.tsx)","outcome":"migrate","status":"done","next_action":"none"},
+{"capability":"database/auth/records","source":"none detected","outcome":"n/a","status":"accepted","next_action":"none"},
+{"capability":"external backend calls","source":"localhost:8000 parse-booking + admin reset (not in archive)","outcome":"preserved with offline fallback","status":"pending","next_action":"provide backend if live AI parsing/reset is wanted"},
+{"capability":"analytics","source":"@vercel/analytics","outcome":"dropped (Vercel-only)","status":"accepted","next_action":"none"}]
