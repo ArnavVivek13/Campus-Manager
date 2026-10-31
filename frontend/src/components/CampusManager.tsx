@@ -174,6 +174,7 @@ export default function CampusManager() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Live Backend State
+  const [selectedWeek, setSelectedWeek] = useState<number>(7)
   const [sessionsList, setSessionsList] = useState<Session[]>(defaultSessions)
   const [examsList, setExamsList] = useState<string[][]>(defaultExams)
   const [bookingsList, setBookingsList] = useState<string[][]>(defaultBookings)
@@ -394,8 +395,10 @@ export default function CampusManager() {
   // Refetch when group, faculty, room filter or disruption view toggles
   useEffect(() => {
     const val = filterType === 'group' ? selectedGroup : filterType === 'faculty' ? selectedFaculty : selectedRoom
-    fetchSchedule(filterType, val, activeView)
-  }, [filterType, selectedGroup, selectedFaculty, selectedRoom, activeView])
+    // If not week 7, force baseline view (pure normal academic schedule)
+    const effView = selectedWeek === 7 ? activeView : 'baseline'
+    fetchSchedule(filterType, val, effView)
+  }, [filterType, selectedGroup, selectedFaculty, selectedRoom, activeView, selectedWeek])
 
   const visibleBookings = useMemo(() => statusFilter === 'All' ? bookingsList : bookingsList.filter(b => b[5] === statusFilter), [statusFilter, bookingsList])
 
@@ -1034,6 +1037,8 @@ export default function CampusManager() {
               availableRooms={availableRoomsList}
               selectedRoom={selectedRoom}
               onSelectRoom={setSelectedRoom}
+              selectedWeek={selectedWeek}
+              setSelectedWeek={setSelectedWeek}
               onSelect={s => setSelected(sessionDetail(s))}
             />
           )}
@@ -1135,6 +1140,21 @@ function useNow() {
   return now
 }
 
+function getWeekDates(weekNum: number) {
+  // Base reference: Week 7 starts on Monday, October 13, 2026
+  const baseMonday = new Date(2026, 9, 13)
+  const diffDays = (weekNum - 7) * 7
+  const monday = new Date(baseMonday.getTime() + diffDays * 86400000)
+
+  return [0, 1, 2, 3, 4].map(dayOffset => {
+    const d = new Date(monday.getTime() + dayOffset * 86400000)
+    return {
+      date: d.getDate(),
+      month: d.toLocaleString('en-US', { month: 'short' })
+    }
+  })
+}
+
 function Timetable({
   sessionsList,
   filterType,
@@ -1148,6 +1168,8 @@ function Timetable({
   availableRooms,
   selectedRoom,
   onSelectRoom,
+  selectedWeek,
+  setSelectedWeek,
   onSelect
 }: {
   sessionsList: Session[]
@@ -1162,15 +1184,26 @@ function Timetable({
   availableRooms: { id: string; name: string }[]
   selectedRoom: string
   onSelectRoom: (r: string) => void
+  selectedWeek: number
+  setSelectedWeek: (w: number) => void
   onSelect: (s: Session) => void
 }) {
   const now = useNow()
   const hours = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => HOUR_START + i)
   const list = sessionsList
+  const weekDates = getWeekDates(selectedWeek)
 
   return <div>
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <Heading title="Week 7 · Semester 2027">
+      <Heading
+        title={
+          selectedWeek === 7
+            ? 'Week 7 · Spectra Fest Week'
+            : selectedWeek === 8
+            ? 'Week 8 · Midsem Exam Week'
+            : `Week ${selectedWeek} · Normal Academic Schedule`
+        }
+      >
         <Pill active={filterType === 'group'} onClick={() => setFilterType('group')}>
           Student Group
         </Pill>
@@ -1181,8 +1214,50 @@ function Timetable({
           Room
         </Pill>
       </Heading>
+    </div>
 
-      <div className="flex items-center gap-2 text-xs">
+    {/* Controls Bar: Week Selector, Week Type Status, and Filters */}
+    <div className="flex flex-wrap items-center justify-between gap-3 text-xs w-full bg-card/60 p-2.5 rounded-xl border border-timetable-grid mb-4">
+      {/* Week Selector Dropdown & Badge */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 rounded-full border border-timetable-grid bg-card px-3 py-1.5 shadow-sm">
+          <CalendarDays className="size-3.5 text-muted-foreground" />
+          <span className="font-medium text-muted-foreground">Week:</span>
+          <select
+            value={selectedWeek}
+            onChange={e => setSelectedWeek(Number(e.target.value))}
+            aria-label="Select semester week"
+            className="bg-transparent font-semibold text-foreground outline-none cursor-pointer pr-1"
+          >
+            {Array.from({ length: 16 }, (_, i) => i + 1).map(w => (
+              <option key={w} value={w} className="bg-card text-foreground">
+                {w === 7
+                  ? 'Week 7 (Spectra Fest Events)'
+                  : w === 8
+                  ? 'Week 8 (Midsem Exams)'
+                  : `Week ${w} (Normal Teaching)`}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {selectedWeek === 7 ? (
+          <span className="rounded-full bg-ev-mint px-3 py-1 text-[11px] font-semibold text-ev-mint-fg">
+            Spectra Fest Week
+          </span>
+        ) : selectedWeek === 8 ? (
+          <span className="rounded-full bg-peach-soft text-peach px-3 py-1 text-[11px] font-semibold">
+            Midsem Exam Week
+          </span>
+        ) : (
+          <span className="rounded-full bg-secondary px-3 py-1 text-[11px] font-medium text-foreground">
+            Normal Academic Timetable
+          </span>
+        )}
+      </div>
+
+      {/* Cohort / Faculty / Room Filtering */}
+      <div className="flex items-center gap-2">
         {filterType === 'group' && (
           <>
             <span className="font-medium text-muted-foreground">Cohort:</span>
@@ -1240,9 +1315,25 @@ function Timetable({
         )}
       </div>
     </div>
+
     <div className="overflow-x-auto"><div className="min-w-[900px]">
       <div className="grid grid-cols-[72px_repeat(5,1fr)] border-b border-timetable-grid text-sm">
-        <div className="border-r border-timetable-grid" />{days.map((d, i) => <div key={d} className={`py-1.5 text-center border-r border-timetable-grid last:border-r-0 ${now?.day === i ? 'rounded-full bg-ev-mint text-ev-mint-fg font-medium' : 'text-foreground/80'}`}>{i + 13} - {d}</div>)}
+        <div className="border-r border-timetable-grid" />
+        {days.map((d, i) => {
+          const dateInfo = weekDates[i]
+          const isToday = now?.day === i
+          return (
+            <div
+              key={d}
+              className={`py-2 text-center border-r border-timetable-grid last:border-r-0 ${
+                isToday ? 'bg-ev-mint text-ev-mint-fg font-medium rounded-t-lg' : 'text-foreground/80'
+              }`}
+            >
+              <span className="font-semibold text-xs">{d}</span>
+              <span className="ml-1.5 text-[11px] opacity-75">{dateInfo.date} {dateInfo.month}</span>
+            </div>
+          )
+        })}
       </div>
       <div className="relative grid grid-cols-[72px_repeat(5,1fr)] border-b border-timetable-grid" style={{ height: hours.length * HOUR_PX }}>
         <div className="border-r border-timetable-grid grid-hours">{hours.map(h => <div key={h} className="pt-2 text-sm text-foreground/80 pr-2 text-right" style={{ height: HOUR_PX }}>{fmt(h)}</div>)}</div>
