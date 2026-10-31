@@ -188,8 +188,25 @@ export default function CampusManager() {
   const [availableRooms, setAvailableRooms] = useState<string[]>([
     'LAB-2', 'LAB-3', 'CR-104', 'LH-1', 'LH-2', 'LH-3', 'AUD', 'SEM-HALL'
   ])
+  const [filterType, setFilterType] = useState<'group' | 'faculty' | 'room'>('group')
   const [availableGroups, setAvailableGroups] = useState<string[]>(['CSE-2', 'All', 'Y1-A', 'Y1-B', 'Y1-C', 'Y1-D', 'CSE-3', 'ECE-2'])
   const [selectedGroup, setSelectedGroup] = useState<string>('CSE-2')
+  const [selectedFaculty, setSelectedFaculty] = useState<string>('All')
+  const [selectedRoom, setSelectedRoom] = useState<string>('All')
+  const [availableFaculty, setAvailableFaculty] = useState<{ id: string; name: string; department: string }[]>([])
+  const [availableRoomsList, setAvailableRoomsList] = useState<{ id: string; name: string; capacity?: number }[]>([
+    { id: 'AUD', name: 'Main Auditorium' },
+    { id: 'LH-1', name: 'Lecture Hall 1' },
+    { id: 'LH-2', name: 'Lecture Hall 2' },
+    { id: 'LH-3', name: 'Lecture Hall 3' },
+    { id: 'CR-101', name: 'Classroom 101' },
+    { id: 'CR-102', name: 'Classroom 102' },
+    { id: 'CR-103', name: 'Classroom 103' },
+    { id: 'CR-104', name: 'Classroom 104' },
+    { id: 'LAB-1', name: 'Computing Lab' },
+    { id: 'LAB-2', name: 'Software Lab' },
+    { id: 'LAB-3', name: 'Hardware Lab' },
+  ])
   const [venuesList, setVenuesList] = useState<[string, string, string][]>([
     ['AUD', '420 seats', 'Available'],
     ['SEM-HALL', '120 seats', 'Available'],
@@ -237,13 +254,24 @@ export default function CampusManager() {
 
   // --- Dynamic API Fetchers ---
 
-  const fetchSchedule = async (grp: string = selectedGroup, view: string = activeView) => {
+  const fetchSchedule = async (
+    type: 'group' | 'faculty' | 'room' = filterType,
+    val?: string,
+    view: string = activeView
+  ) => {
     try {
-      const q = grp === 'All' ? `?view=${view}` : `?group_id=${encodeURIComponent(grp)}&view=${view}`
-      const res = await fetch(`${API_BASE}/api/schedule${q}`)
+      const activeVal = val !== undefined ? val : (type === 'group' ? selectedGroup : type === 'faculty' ? selectedFaculty : selectedRoom)
+      const params = new URLSearchParams()
+      if (view) params.append('view', view)
+      if (activeVal && activeVal !== 'All') {
+        if (type === 'group') params.append('group_id', activeVal)
+        else if (type === 'faculty') params.append('faculty_id', activeVal)
+        else if (type === 'room') params.append('room_id', activeVal)
+      }
+      const res = await fetch(`${API_BASE}/api/schedule?${params.toString()}`)
       if (!res.ok) return
       const data = await res.json()
-      if (Array.isArray(data.sessions) && data.sessions.length > 0) {
+      if (Array.isArray(data.sessions)) {
         const mapped: Session[] = data.sessions.map((s: any) => {
           const d = dayMap[s.day] ?? 0
           const start = periodToHour(s.start_period)
@@ -285,13 +313,11 @@ export default function CampusManager() {
         const grpIds = ['CSE-2', 'All', ...data.groups.map((g: any) => g.id).filter((id: string) => id !== 'CSE-2')]
         setAvailableGroups(grpIds)
       }
-      if (data.rooms) {
-        const venues: [string, string, string][] = data.rooms.slice(0, 5).map((r: any) => [
-          r.id,
-          `${r.capacity} seats`,
-          r.id === 'LH-1' ? 'Booked 18:00' : 'Available'
-        ])
-        setVenuesList(venues)
+      if (data.faculty && Array.isArray(data.faculty)) {
+        setAvailableFaculty(data.faculty)
+      }
+      if (data.rooms && Array.isArray(data.rooms)) {
+        setAvailableRoomsList(data.rooms.map((r: any) => ({ id: r.id, name: r.name || r.id, capacity: r.capacity })))
         const roomIds = data.rooms.map((r: any) => r.id)
         if (roomIds.length > 0) {
           setAvailableRooms(roomIds)
@@ -358,16 +384,16 @@ export default function CampusManager() {
   // Initial load
   useEffect(() => {
     fetchMetadata()
-    fetchSchedule(selectedGroup)
     fetchExams()
     fetchBookings()
     fetchDisruptionHistory()
   }, [])
 
-  // Refetch when group filter or disruption view toggles
+  // Refetch when group, faculty, room filter or disruption view toggles
   useEffect(() => {
-    fetchSchedule(selectedGroup, activeView)
-  }, [selectedGroup, activeView])
+    const val = filterType === 'group' ? selectedGroup : filterType === 'faculty' ? selectedFaculty : selectedRoom
+    fetchSchedule(filterType, val, activeView)
+  }, [filterType, selectedGroup, selectedFaculty, selectedRoom, activeView])
 
   const visibleBookings = useMemo(() => statusFilter === 'All' ? bookingsList : bookingsList.filter(b => b[5] === statusFilter), [statusFilter, bookingsList])
 
@@ -843,7 +869,23 @@ export default function CampusManager() {
         </div>
         <div className="px-2 pt-6 pb-2 lg:px-4">
           {notice && <div className="mb-5 flex items-center justify-between rounded-lg bg-success-soft px-4 py-3 text-xs text-success"><span><Check className="mr-2 inline size-3.5" />{notice}</span><button onClick={() => setNotice('')} aria-label="Dismiss"><X className="size-4" /></button></div>}
-          {activeTab === 0 && <Timetable sessionsList={sessionsList} availableGroups={availableGroups} selectedGroup={selectedGroup} onSelectGroup={setSelectedGroup} onSelect={s => setSelected(sessionDetail(s))} />}
+          {activeTab === 0 && (
+            <Timetable
+              sessionsList={sessionsList}
+              filterType={filterType}
+              setFilterType={setFilterType}
+              availableGroups={availableGroups}
+              selectedGroup={selectedGroup}
+              onSelectGroup={setSelectedGroup}
+              availableFaculty={availableFaculty}
+              selectedFaculty={selectedFaculty}
+              onSelectFaculty={setSelectedFaculty}
+              availableRooms={availableRoomsList}
+              selectedRoom={selectedRoom}
+              onSelectRoom={setSelectedRoom}
+              onSelect={s => setSelected(sessionDetail(s))}
+            />
+          )}
           {activeTab === 1 && <Fest rows={visibleBookings} stats={festStats} filter={statusFilter} setFilter={setStatusFilter} onSelect={r => setSelected(bookingDetail(r))} />}
           {activeTab === 2 && <ExamGrid list={examsList} onSelect={e => setSelected(examDetail(e))} />}
           {activeTab === 3 && (
@@ -905,37 +947,107 @@ function useNow() {
 
 function Timetable({
   sessionsList,
+  filterType,
+  setFilterType,
   availableGroups,
   selectedGroup,
   onSelectGroup,
+  availableFaculty,
+  selectedFaculty,
+  onSelectFaculty,
+  availableRooms,
+  selectedRoom,
+  onSelectRoom,
   onSelect
 }: {
   sessionsList: Session[]
+  filterType: 'group' | 'faculty' | 'room'
+  setFilterType: (t: 'group' | 'faculty' | 'room') => void
   availableGroups: string[]
   selectedGroup: string
   onSelectGroup: (grp: string) => void
+  availableFaculty: { id: string; name: string; department: string }[]
+  selectedFaculty: string
+  onSelectFaculty: (f: string) => void
+  availableRooms: { id: string; name: string }[]
+  selectedRoom: string
+  onSelectRoom: (r: string) => void
   onSelect: (s: Session) => void
 }) {
-  const [cat, setCat] = useState('All')
   const now = useNow()
   const hours = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => HOUR_START + i)
-  const list = cat === 'All' ? sessionsList : sessionsList.filter(s => s.cat === cat)
+  const list = sessionsList
 
   return <div>
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
       <Heading title="Week 7 · Semester 2027">
-        {categories.map(c => <Pill key={c} active={cat === c} onClick={() => setCat(c)}>{c}</Pill>)}
+        <Pill active={filterType === 'group'} onClick={() => setFilterType('group')}>
+          Student Group
+        </Pill>
+        <Pill active={filterType === 'faculty'} onClick={() => setFilterType('faculty')}>
+          Faculty
+        </Pill>
+        <Pill active={filterType === 'room'} onClick={() => setFilterType('room')}>
+          Room
+        </Pill>
       </Heading>
+
       <div className="flex items-center gap-2 text-xs">
-        <span className="font-medium text-muted-foreground">Cohort:</span>
-        <select
-          value={selectedGroup}
-          onChange={e => onSelectGroup(e.target.value)}
-          aria-label="Filter student cohort"
-          className="rounded-full border border-timetable-grid bg-card px-3 py-1.5 text-xs font-medium text-foreground outline-none focus:ring-2 focus:ring-ring"
-        >
-          {availableGroups.map(g => <option key={g} value={g}>{g}</option>)}
-        </select>
+        {filterType === 'group' && (
+          <>
+            <span className="font-medium text-muted-foreground">Cohort:</span>
+            <select
+              value={selectedGroup}
+              onChange={e => onSelectGroup(e.target.value)}
+              aria-label="Filter student cohort"
+              className="rounded-full border border-timetable-grid bg-card px-3 py-1.5 text-xs font-medium text-foreground outline-none focus:ring-2 focus:ring-ring"
+            >
+              {availableGroups.map(g => (
+                <option key={g} value={g}>
+                  {g === 'All' ? 'All Cohorts' : g}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+
+        {filterType === 'faculty' && (
+          <>
+            <span className="font-medium text-muted-foreground">Faculty:</span>
+            <select
+              value={selectedFaculty}
+              onChange={e => onSelectFaculty(e.target.value)}
+              aria-label="Filter faculty member"
+              className="rounded-full border border-timetable-grid bg-card px-3 py-1.5 text-xs font-medium text-foreground outline-none focus:ring-2 focus:ring-ring max-w-[240px]"
+            >
+              <option value="All">All Faculty</option>
+              {availableFaculty.map(f => (
+                <option key={f.id} value={f.id}>
+                  {f.id} - {f.name} ({f.department})
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+
+        {filterType === 'room' && (
+          <>
+            <span className="font-medium text-muted-foreground">Room:</span>
+            <select
+              value={selectedRoom}
+              onChange={e => onSelectRoom(e.target.value)}
+              aria-label="Filter room or venue"
+              className="rounded-full border border-timetable-grid bg-card px-3 py-1.5 text-xs font-medium text-foreground outline-none focus:ring-2 focus:ring-ring max-w-[200px]"
+            >
+              <option value="All">All Rooms</option>
+              {availableRooms.map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.id} {r.name && r.name !== r.id ? `(${r.name})` : ''}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
       </div>
     </div>
     <div className="overflow-x-auto"><div className="min-w-[900px]">
