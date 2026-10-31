@@ -75,3 +75,6 @@ report.json
 !exports/schedule.json
 !exports/schedule_after.json
 
+
+*.db
+*.sqlite3
