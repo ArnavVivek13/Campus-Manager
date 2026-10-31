@@ -70,7 +70,7 @@ flowchart TD
    ```
 2. Install Python dependencies:
    ```bash
-   pip install ortools fastapi uvicorn pydantic google-genai
+   pip install -r requirements.txt
    ```
 3. Run the complete schedule generation pipeline:
    ```bash
@@ -84,18 +84,26 @@ flowchart TD
    ```
    API interactive docs available at: `http://localhost:8000/docs`.
 
+5. Launch the Frontend (in `frontend` directory):
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+   Web interface available at: `http://localhost:8080` (or `http://localhost:3000`).
+
 ---
 
 ## 5. Demo Accounts
 
-The platform supports four key campus roles with distinct permissions:
+The platform includes four pre-seeded institutional accounts with persistent JWT authentication and distinct permissions:
 
-| Role | Username / Identifier | Capabilities & Permissions |
-| :--- | :--- | :--- |
-| **Admin (Dean's Office)** | `admin@cit.edu` | Master access: Generates timetables, approves disruption re-scheduling, has the **"Reset Demo Data"** button, and manages overrides. |
-| **Department Coordinator** | `coord_cse@cit.edu` | Requests changes to department sessions, books departmental events, reviews department lab utilization. |
-| **Faculty** | `faculty_f01@cit.edu` | Views personalized timetable, marks leaves/unavailability, requests rescheduled sessions with AI assistant. |
-| **Club Representative** | `club_dramatics@cit.edu` | Submits venue booking requests in plain English/Hinglish, edits draft cards, views decision rationale. |
+| Role | Email | Password | Capabilities & Permissions |
+| :--- | :--- | :--- | :--- |
+| **Admin (Dean's Office)** | `admin@cit.edu` | `Admin@123` | Full access: Master Timetable, Spectra Fest, Midsem Exams, Disruption Studio diff review & commit, and the **"Reset Demo Data"** button. |
+| **Faculty** | `faculty@cit.edu` | `Faculty@123` | Views personalized faculty timetable, filters slots by faculty member, submits booking requests. |
+| **Club Booking Lead** | `club@cit.edu` | `Club@123` | Submits venue booking requests in plain English/Hinglish, reviews parsed proposal cards, checks venue availability. |
+| **Student (Read-Only)** | `student@cit.edu` | `Student@123` | Read-only view: Master Timetable, Midsem Exam schedules, and Spectra Fest calendars filtered by student group or room. |
 
 > [!IMPORTANT]
 > The **Admin Dashboard** features a dedicated **"Reset Demo Data"** button (`POST /api/admin/reset`) enabling judges to restore clean baseline state at any point during testing.
