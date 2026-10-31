@@ -353,19 +353,61 @@ def explain_endpoint(req: ExplainRequest):
 
 
 @app.post("/api/disruption/preview")
-def preview_sample_disruption():
-    """Generates a diff of moved sessions for Admin review before applying."""
-    if os.path.exists(SAMPLE_DISRUPTION_PATH):
-        with open(SAMPLE_DISRUPTION_PATH, "r", encoding="utf-8") as f:
-            dis = json.load(f)
-    else:
+def preview_sample_disruption(db: Session = Depends(get_db)):
+    """
+    Dynamically loads sample_disruption.json, applies it against active baseline data,
+    runs TimetableSolver with high stability weights, and produces the true minimal-diff schedule.
+    """
+    if not os.path.exists(SAMPLE_DISRUPTION_PATH):
         raise HTTPException(status_code=404, detail="sample_disruption.json not found")
 
-    base_map = {s["session_id"]: s for s in STATE["baseline_schedule"]["sessions"]}
-    after_map = {s["session_id"]: s for s in STATE["schedule_after"]["sessions"]}
+    with open(SAMPLE_DISRUPTION_PATH, "r", encoding="utf-8") as f:
+        dis = json.load(f)
+
+    if not STATE.get("data") or not STATE.get("schedule"):
+        load_initial_state()
+
+    dis_data = validator.apply_disruption(STATE["data"], dis)
+    base_map = {s["session_id"]: s for s in STATE["schedule"].get("sessions", [])}
+    baseline_tuples = {
+        s["session_id"]: (s["day"], s["start_period"], s["room_id"])
+        for s in STATE["schedule"].get("sessions", [])
+    }
+
+    t_solver = TimetableSolver(dis_data, time_limit_seconds=25.0)
+    re_res = t_solver.solve(baseline=baseline_tuples, stability_weight_time=100000, stability_weight_room=1000)
+    if not re_res["solvable"]:
+        raise HTTPException(status_code=422, detail="Sample disruption could not be resolved without hard clashes.")
+
+    re_assign = re_res["assignment"]
+
+    schedule_after = {
+        "team": "Zephyr",
+        "dataset_id": dis_data.get("dataset_id", "cit-public-v1"),
+        "sessions": [
+            {
+                "session_id": sid,
+                "day": val["day"],
+                "start_period": val["start_period"],
+                "room_id": val["room_id"]
+            }
+            for sid, val in re_assign.items()
+        ],
+        "fest_week": STATE["schedule"].get("fest_week", {}),
+        "exams": STATE["schedule"].get("exams", [])
+    }
+
+    STATE["schedule_after"] = schedule_after
+
+    # Save to exports/schedule_after.json
+    try:
+        with open(SCHEDULE_AFTER_PATH, "w", encoding="utf-8") as f:
+            json.dump(schedule_after, f, indent=2)
+    except Exception:
+        pass
 
     diff = []
-    for sid, after in after_map.items():
+    for sid, after in re_assign.items():
         base = base_map.get(sid)
         if not base:
             diff.append({"session_id": sid, "change_type": "new_session_added", "to": after})
@@ -387,7 +429,7 @@ def preview_sample_disruption():
 
 
 @app.post("/api/disruption/upload")
-async def upload_disruption_endpoint(file: UploadFile = File(None)):
+async def upload_disruption_endpoint(file: UploadFile = File(None), db: Session = Depends(get_db)):
     """
     Allows Admin to upload a custom disruption JSON file (e.g. sample_disruption.json or judge's test).
     Applies the disruption, solves with minimal perturbation CP-SAT solver, and returns diff.
@@ -395,7 +437,7 @@ async def upload_disruption_endpoint(file: UploadFile = File(None)):
     if not file:
         raise HTTPException(status_code=400, detail="No disruption file provided.")
     if not STATE.get("data") or not STATE.get("schedule"):
-        raise HTTPException(status_code=400, detail="Please load or restore baseline dataset first.")
+        load_initial_state()
 
     try:
         content = await file.read()
@@ -412,7 +454,7 @@ async def upload_disruption_endpoint(file: UploadFile = File(None)):
         }
 
         t_solver = TimetableSolver(dis_data, time_limit_seconds=25.0)
-        re_res = t_solver.solve(baseline=baseline_tuples, stability_weight_time=1000, stability_weight_room=100)
+        re_res = t_solver.solve(baseline=baseline_tuples, stability_weight_time=100000, stability_weight_room=1000)
         if not re_res["solvable"]:
             raise HTTPException(status_code=422, detail="Disruption could not be resolved without constraint clashes.")
 
@@ -435,6 +477,12 @@ async def upload_disruption_endpoint(file: UploadFile = File(None)):
         }
 
         STATE["schedule_after"] = schedule_after
+
+        try:
+            with open(SCHEDULE_AFTER_PATH, "w", encoding="utf-8") as f:
+                json.dump(schedule_after, f, indent=2)
+        except Exception:
+            pass
 
         diff = []
         for sid, after in re_assign.items():
@@ -466,13 +514,42 @@ async def upload_disruption_endpoint(file: UploadFile = File(None)):
 
 
 @app.post("/api/disruption/approve")
-def approve_disruption():
-    """Admin approves disruption, switching active timetable to repaired schedule."""
+def approve_disruption(db: Session = Depends(get_db)):
+    """
+    Admin approves disruption, switching active timetable to repaired schedule
+    and durably committing the after_disruption schedule into SQL DBMS.
+    """
+    if not STATE.get("schedule_after") or not STATE["schedule_after"].get("sessions"):
+        raise HTTPException(status_code=400, detail="No repaired disruption schedule available to approve.")
+
     STATE["active_view"] = "after_disruption"
+
+    # Save to exports/schedule.json so direct file downloads reflect active schedule
+    try:
+        with open(SCHEDULE_PATH, "w", encoding="utf-8") as f:
+            json.dump(STATE["schedule_after"], f, indent=2)
+    except Exception:
+        pass
+
+    # Durably commit into SQL DBMS
+    sync_schedule_to_db(db, STATE["schedule_after"], version_tag="after_disruption", set_as_active=True)
+
+    # Log in DisruptionLog table
+    log = DisruptionLog(
+        disruption_type="APPROVE_DISRUPTION",
+        affected_entity="CAMPUS_WIDE",
+        action="COMMIT",
+        summary=f"Approved disruption repair: {len(STATE.get('disruption_diff') or [])} session moves",
+        moves_json=json.dumps(STATE.get("disruption_diff") or []),
+        schedule_snapshot_json=json.dumps(STATE["schedule_after"])
+    )
+    db.add(log)
+    db.commit()
+
     return {
         "status": "approved",
         "active_view": STATE["active_view"],
-        "message": "Disruption changes committed to live semester timetable."
+        "message": "Disruption changes committed to live semester timetable and SQL DBMS."
     }
 
 
