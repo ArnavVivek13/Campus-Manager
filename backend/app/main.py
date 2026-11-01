@@ -334,7 +334,15 @@ def get_fest_bookings(db: Session = Depends(get_db)):
     """
     sched = STATE.get("schedule")
     if not sched or not STATE.get("data"):
-        return {"bookings": [], "session_overrides": []}
+        return {
+            "bookings": [],
+            "session_overrides": [],
+            "booking_score": 0,
+            "booking_score_max": 0,
+            "approved": 0,
+            "alternatives": 0,
+            "rejected": 0
+        }
     requests = STATE["data"].get("booking_requests", [])
     req_map = {r["id"]: r for r in requests}
     cancellations = {c["request_id"] for c in STATE["data"].get("cancellations", [])}
@@ -401,9 +409,42 @@ def get_fest_bookings(db: Session = Depends(get_db)):
                 "reason": cb.reason or "Submitted via AI Booking Assistant"
             })
 
+    CAT_WEIGHT = {
+        "institute_event": 5, "institute": 5,
+        "guest_lecture": 4, "guest": 4,
+        "department_event": 3, "department": 3,
+        "club_event": 2, "club": 2,
+        "informal": 1
+    }
+    score = 0.0
+    max_score = 0.0
+    approved_cnt = 0
+    alts_cnt = 0
+    rejs_cnt = 0
+
+    for b in enriched:
+        r = b.get("request", {})
+        cat = str(r.get("requested_category") or r.get("category") or r.get("role") or "club_event").lower()
+        w = CAT_WEIGHT.get(cat, 2)
+        max_score += w
+        st = (b.get("status") or "").lower()
+        if st == "approved":
+            score += w * 1.0
+            approved_cnt += 1
+        elif st == "alternative_offered":
+            score += w * 0.5
+            alts_cnt += 1
+        elif st in ("rejected", "cancelled"):
+            rejs_cnt += 1
+
     return {
         "bookings": enriched,
-        "session_overrides": sched.get("fest_week", {}).get("session_overrides", [])
+        "session_overrides": sched.get("fest_week", {}).get("session_overrides", []),
+        "booking_score": round(score, 1) if score % 1 != 0 else int(score),
+        "booking_score_max": round(max_score, 1) if max_score % 1 != 0 else int(max_score),
+        "approved": approved_cnt,
+        "alternatives": alts_cnt,
+        "rejected": rejs_cnt
     }
 
 

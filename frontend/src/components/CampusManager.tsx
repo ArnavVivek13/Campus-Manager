@@ -212,7 +212,7 @@ export default function CampusManager() {
   const [examsList, setExamsList] = useState<string[][]>([])
   const [bookingsList, setBookingsList] = useState<string[][]>([])
   const [festStats, setFestStats] = useState<[string, string, Hue][]>([
-    ['0/0', 'Booking score', 'violet'],
+    ['0', 'Booking score', 'violet'],
     ['0', 'Approved', 'mint'],
     ['0', 'Alternatives offered', 'peach'],
     ['0', 'Rejected', 'rose'],
@@ -437,11 +437,26 @@ export default function CampusManager() {
         })
         setBookingsList(mapped)
 
-        const approved = data.bookings.filter((b: any) => b.status === 'approved').length
-        const alts = data.bookings.filter((b: any) => b.status === 'alternative_offered').length
-        const rejs = data.bookings.filter((b: any) => b.status === 'rejected' || b.status === 'cancelled').length
+        if (data.bookings.length === 0) {
+          setFestStats([
+            ['0', 'Booking score', 'violet'],
+            ['0', 'Approved', 'mint'],
+            ['0', 'Alternatives offered', 'peach'],
+            ['0', 'Rejected', 'rose'],
+            ['0', 'Inversions', 'sky']
+          ])
+          return
+        }
+
+        const approved = data.approved !== undefined ? data.approved : data.bookings.filter((b: any) => b.status === 'approved').length
+        const alts = data.alternatives !== undefined ? data.alternatives : data.bookings.filter((b: any) => b.status === 'alternative_offered').length
+        const rejs = data.rejected !== undefined ? data.rejected : data.bookings.filter((b: any) => b.status === 'rejected' || b.status === 'cancelled').length
+        const scoreStr = (data.booking_score !== undefined && data.booking_score_max)
+          ? `${data.booking_score}/${data.booking_score_max}`
+          : `${approved + alts * 0.5}/${data.bookings.length}`
+
         setFestStats([
-          ['64.5/70', 'Booking score', 'violet'],
+          [scoreStr, 'Booking score', 'violet'],
           [String(approved), 'Approved', 'mint'],
           [String(alts), 'Alternatives offered', 'peach'],
           [String(rejs), 'Rejected', 'rose'],
@@ -1996,8 +2011,6 @@ function Disruption({
 }) {
   const [activeSubTab, setActiveSubTab] = useState<'simulation' | 'history'>('simulation')
   const [busy, setBusy] = useState(false)
-  const [cleanOpen, setCleanOpen] = useState(true)
-  const [softMarginOpen, setSoftMarginOpen] = useState(true)
 
   const wrappedApplyMoves = async () => {
     setBusy(true)
@@ -2030,26 +2043,6 @@ function Disruption({
     return match ? (match[1] || match[2]) : 'LAB-2'
   }
 
-  // Separate moves into clean (room-only) vs soft margin (time moves or new sessions)
-  const { cleanMoves, softMarginMoves } = useMemo(() => {
-    const clean: string[][] = []
-    const soft: string[][] = []
-    moves.forEach(m => {
-      const orig = m[2] ?? ''
-      const dest = m[3] ?? ''
-      const isNew = orig.includes('New session')
-      // Detect if day or period changed
-      const origTime = orig.split('·')[0]?.trim() || ''
-      const destTime = dest.split('·')[0]?.trim() || ''
-      if (isNew || (origTime && destTime && origTime !== destTime)) {
-        soft.push(m)
-      } else {
-        clean.push(m)
-      }
-    })
-    return { cleanMoves: clean, softMarginMoves: soft }
-  }, [moves])
-
   // Count decisions
   const stats = useMemo(() => {
     let accepted = 0
@@ -2065,7 +2058,7 @@ function Disruption({
     return { accepted, reassigned, rejected }
   }, [moves, decisions])
 
-  const renderMoveCard = (m: string[], isSoftMargin: boolean) => {
+  const renderMoveCard = (m: string[]) => {
     const sid = m[0] ?? ''
     const proposedRoom = getProposedRoom(m)
     const dec = (sid && decisions[sid]) ? decisions[sid] : { action: 'ACCEPT' as const, room_id: proposedRoom }
@@ -2076,7 +2069,7 @@ function Disruption({
         key={sid}
         className={`flex flex-col justify-between rounded-none border border-timetable-grid p-4 transition ${
           dec.action === 'ACCEPT'
-            ? isSoftMargin ? `${hue.peach} ring-1 ring-amber-500/30` : `${hue.sky} ring-1 ring-emerald-500/30`
+            ? `${hue.sky} ring-1 ring-emerald-500/30`
             : dec.action === 'REASSIGN'
             ? `${hue.violet} ring-1 ring-sky-500/30`
             : 'bg-muted/70 opacity-80 ring-1 ring-rose-500/30'
@@ -2090,24 +2083,17 @@ function Disruption({
               </span>
               <p className="text-sm font-medium">{m[1]}</p>
             </div>
-            <div className="flex items-center gap-1.5">
-              {isSoftMargin && (
-                <span className="rounded px-1.5 py-0.5 text-[9px] font-semibold bg-amber-500/20 text-amber-700 dark:text-amber-300">
-                  Time / Ripple
-                </span>
-              )}
-              <span
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
-                  dec.action === 'ACCEPT'
-                    ? 'bg-emerald-600 text-white'
-                    : dec.action === 'REASSIGN'
-                    ? 'bg-sky-600 text-white'
-                    : 'bg-rose-600 text-white'
-                }`}
-              >
-                {dec.action}
-              </span>
-            </div>
+            <span
+              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                dec.action === 'ACCEPT'
+                  ? 'bg-emerald-600 text-white'
+                  : dec.action === 'REASSIGN'
+                  ? 'bg-sky-600 text-white'
+                  : 'bg-rose-600 text-white'
+              }`}
+            >
+              {dec.action}
+            </span>
           </div>
 
           <div className="mt-3 text-xs">
@@ -2275,16 +2261,20 @@ function Disruption({
             <>
               {/* Summary counters */}
               <div className="mt-5 flex flex-wrap items-center gap-2 text-xs">
-                <span className="rounded-full bg-secondary px-3 py-1.5 font-medium">{moves.length} total moves</span>
+                <span className="rounded-full bg-secondary px-3 py-1.5 font-medium">{moves.length} proposed moves</span>
                 <span className="rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-3 py-1.5 font-medium">
-                  {cleanMoves.length} no-issue room relocations
+                  {stats.accepted} accepted
                 </span>
-                <span className="rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20 px-3 py-1.5 font-medium">
-                  {softMarginMoves.length} soft margin / review items
-                </span>
-                <span className="rounded-full bg-sky-500/10 text-sky-600 border border-sky-500/20 px-3 py-1.5 font-medium">
-                  {stats.reassigned} custom reassignments
-                </span>
+                {stats.reassigned > 0 && (
+                  <span className="rounded-full bg-sky-500/10 text-sky-600 border border-sky-500/20 px-3 py-1.5 font-medium">
+                    {stats.reassigned} custom reassignments
+                  </span>
+                )}
+                {stats.rejected > 0 && (
+                  <span className="rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/20 px-3 py-1.5 font-medium">
+                    {stats.rejected} rejected
+                  </span>
+                )}
                 {isCommitted && (
                   <span className="rounded-full bg-success/20 px-3 py-1.5 text-success font-medium">
                     Currently active on timetable
@@ -2292,62 +2282,24 @@ function Disruption({
                 )}
               </div>
 
-              {/* 1. Expandable Dropdown: No Issue Relocated */}
+              {/* Unified Moves Grid */}
               <div className="mt-5 border border-timetable-grid bg-card">
-                <button
-                  type="button"
-                  onClick={() => setCleanOpen(o => !o)}
-                  className="w-full flex items-center justify-between p-4 text-left font-semibold text-sm bg-muted/40 hover:bg-muted/70 transition"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="size-2.5 rounded-full bg-emerald-500" />
-                    <span>1. No-Issue Room Relocations ({cleanMoves.length})</span>
-                    <span className="text-xs font-normal text-muted-foreground">
-                      — Seamless room shifts preserving original period & day
-                    </span>
+                <div className="p-4 border-b border-timetable-grid bg-muted/30 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="size-2 rounded-full bg-primary" />
+                    <span className="font-semibold text-sm">Proposed Schedule Moves ({moves.length})</span>
                   </div>
-                  <span className="text-xs text-muted-foreground">{cleanOpen ? 'Collapse ▲' : 'Expand ▼'}</span>
-                </button>
-                {cleanOpen && (
-                  <div className="p-4 border-t border-timetable-grid">
-                    {cleanMoves.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic">No room-only relocations in this disruption.</p>
-                    ) : (
-                      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                        {cleanMoves.map(m => renderMoveCard(m, false))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* 2. Expandable Dropdown: Soft Margin Relocations */}
-              <div className="mt-4 border border-timetable-grid bg-card">
-                <button
-                  type="button"
-                  onClick={() => setSoftMarginOpen(o => !o)}
-                  className="w-full flex items-center justify-between p-4 text-left font-semibold text-sm bg-amber-500/10 hover:bg-amber-500/15 transition border-l-4 border-amber-500"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="size-2.5 rounded-full bg-amber-500" />
-                    <span>2. Soft Margin Relocations ({softMarginMoves.length})</span>
-                    <span className="text-xs font-normal text-amber-700 dark:text-amber-300">
-                      — Time shifts or added sessions requiring coordinator review
-                    </span>
-                  </div>
-                  <span className="text-xs text-muted-foreground">{softMarginOpen ? 'Collapse ▲' : 'Expand ▼'}</span>
-                </button>
-                {softMarginOpen && (
-                  <div className="p-4 border-t border-timetable-grid">
-                    {softMarginMoves.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic">No soft margin time shifts or added sessions.</p>
-                    ) : (
-                      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                        {softMarginMoves.map(m => renderMoveCard(m, true))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                  <span className="text-xs text-muted-foreground">Minimal perturbation disruption recovery</span>
+                </div>
+                <div className="p-4">
+                  {moves.length === 0 ? (
+                    <p className="text-xs text-muted-foreground italic">No moves required for this disruption.</p>
+                  ) : (
+                    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                      {moves.map(m => renderMoveCard(m))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Bottom Action Footer */}
