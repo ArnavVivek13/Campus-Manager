@@ -2,7 +2,21 @@ import React from 'react'
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { AlertTriangle, Bot, CalendarDays, Check, ChevronRight, CircleCheck, Clock3, Command, DoorOpen, GitCompareArrows, GraduationCap, MessageSquareText, MoreHorizontal, PanelLeft, Pencil, RotateCcw, Send, SlidersHorizontal, Sparkles, Users, X, Menu, Moon, Sun, Loader2, History, CheckCircle2, XCircle, ArrowRight, LogOut, Lock, Mail, Eye, EyeOff, ShieldCheck, UserPlus, Download, Upload, Trash2, UserCheck, UserX, RefreshCw } from 'lucide-react'
 
-const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://127.0.0.1:8000'
+export const getApiBase = (): string => {
+  if (typeof window !== 'undefined') {
+    const custom = localStorage.getItem('custom_api_url')
+    if (custom && custom.trim()) {
+      return custom.trim().replace(/\/+$/, '')
+    }
+  }
+  const envUrl = (import.meta as any).env?.VITE_API_URL
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, '')
+  }
+  return 'http://127.0.0.1:8000'
+}
+
+const API_BASE = getApiBase()
 
 type AuthUser = {
   id: number
@@ -3029,6 +3043,23 @@ function AuthScreen({
   const [regPassword, setRegPassword] = useState('')
   const [regRole, setRegRole] = useState('STUDENT')
   const [regDepartment, setRegDepartment] = useState('Computer Science')
+  const [customApiUrl, setCustomApiUrl] = useState(
+    typeof window !== 'undefined' ? (localStorage.getItem('custom_api_url') || '') : ''
+  )
+  const [showApiConfig, setShowApiConfig] = useState(false)
+
+  const handleSaveApiUrl = (urlToSave: string) => {
+    let clean = urlToSave.trim().replace(/\/+$/, '')
+    if (clean && !clean.startsWith('http://') && !clean.startsWith('https://')) {
+      clean = 'https://' + clean
+    }
+    if (clean) {
+      localStorage.setItem('custom_api_url', clean)
+    } else {
+      localStorage.removeItem('custom_api_url')
+    }
+    window.location.reload()
+  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -3187,9 +3218,37 @@ function AuthScreen({
 
           {/* Error Banner */}
           {error && (
-            <div className="mt-4 flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-600">
-              <AlertTriangle className="size-4 shrink-0" />
-              <span>{error}</span>
+            <div className="mt-4 space-y-2.5 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-600">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="size-4 shrink-0" />
+                <span className="font-semibold">{error}</span>
+              </div>
+              {(error.toLowerCase().includes('networkerror') || error.toLowerCase().includes('fetch')) && (
+                <div className="rounded-md bg-card/80 p-2.5 text-foreground space-y-2 border border-rose-500/20 text-[11px]">
+                  <p className="leading-relaxed">
+                    <strong>Note:</strong> Your Internet/Wi-Fi is active! This occurs because the browser cannot reach the backend server at <code className="bg-muted px-1.5 py-0.5 rounded font-mono text-[10px]">{API_BASE}</code>.
+                  </p>
+                  <p className="text-muted-foreground leading-relaxed">
+                    Paste your live <strong>Render backend URL</strong> (e.g. <code className="font-mono text-[10px]">https://your-service.onrender.com</code>) below to connect:
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={customApiUrl}
+                      onChange={e => setCustomApiUrl(e.target.value)}
+                      placeholder="https://cit-backend.onrender.com"
+                      className="flex-1 rounded border border-timetable-grid bg-background px-2.5 py-1 text-xs font-mono outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSaveApiUrl(customApiUrl)}
+                      className="rounded bg-rose-600 px-3 py-1 font-semibold text-white hover:bg-rose-700 transition shrink-0"
+                    >
+                      Connect
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -3401,9 +3460,60 @@ function AuthScreen({
             </div>
           )}
 
-          <div className="mt-4 flex items-center justify-between text-[11px] text-muted-foreground">
-            <span>Secure Institutional RBAC & JWT</span>
-            <span>CIT Campus Ops</span>
+          {/* Configurable Backend Endpoint Footer */}
+          <div className="mt-4 pt-3 border-t border-timetable-grid space-y-2">
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              <div className="flex items-center gap-1.5 overflow-hidden">
+                <span className="size-1.5 rounded-full bg-emerald-500 shrink-0" />
+                <span className="truncate">Backend: <code className="font-mono text-[10px]">{API_BASE}</code></span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowApiConfig(v => !v)}
+                className="text-primary hover:underline font-medium text-[11px] shrink-0 ml-2"
+              >
+                {showApiConfig ? 'Close' : 'Configure'}
+              </button>
+            </div>
+
+            {showApiConfig && (
+              <div className="rounded-lg border border-timetable-grid bg-muted/60 p-3 text-xs space-y-2">
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Enter your deployed Render backend URL or custom server endpoint:
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={customApiUrl}
+                    onChange={e => setCustomApiUrl(e.target.value)}
+                    placeholder="https://cit-backend.onrender.com"
+                    className="flex-1 rounded border border-timetable-grid bg-background px-2.5 py-1 text-xs font-mono outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleSaveApiUrl(customApiUrl)}
+                    className="rounded bg-primary px-3 py-1 font-semibold text-primary-foreground hover:opacity-90 transition shrink-0"
+                  >
+                    Save
+                  </button>
+                  {localStorage.getItem('custom_api_url') && (
+                    <button
+                      type="button"
+                      onClick={() => handleSaveApiUrl('')}
+                      className="rounded border border-timetable-grid px-2 py-1 text-muted-foreground hover:bg-muted transition shrink-0"
+                      title="Reset to default"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1">
+              <span>Secure Institutional RBAC & JWT</span>
+              <span>CIT Campus Ops</span>
+            </div>
           </div>
         </div>
       </div>
