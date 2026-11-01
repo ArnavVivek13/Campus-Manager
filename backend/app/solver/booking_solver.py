@@ -205,7 +205,13 @@ class BookingSolver:
 
                             for d_sid in displaced_sessions:
                                 d_s = self.sessions[d_sid]
-                                # Find another room at the same time or open period
+                                d_assign = self.base_timetable[d_sid]
+                                d_day = d_assign["day"]
+                                d_start = d_assign["start_period"]
+                                d_dur = d_s["duration"]
+                                d_pers = list(range(d_start, d_start + d_dur))
+
+                                # Find another compatible room at the same time slot
                                 relocated = False
                                 for alt_r in self.rooms.values():
                                     if alt_r["id"] == rid:
@@ -214,18 +220,19 @@ class BookingSolver:
                                         continue
                                     if d_s.get("needs_accessible") and not alt_r.get("accessible"):
                                         continue
-                                    # Check alt_r availability at w_day, pers
-                                    if any((alt_r["id"], w_day, p) in self.room_un[alt_r["id"]] for p in pers):
+                                    # Check alt_r availability at d_day, d_pers
+                                    if any((alt_r["id"], d_day, p) in self.room_un[alt_r["id"]] for p in d_pers):
                                         continue
-                                    if any(room_busy[(alt_r["id"], w_day, p)] for p in pers):
+                                    if any(room_busy[(alt_r["id"], d_day, p)] for p in d_pers):
                                         continue
                                     # Alt room fits!
                                     temp_overrides.append({
                                         "session_id": d_sid,
-                                        "day": w_day,
-                                        "start_period": start_p,
+                                        "day": d_day,
+                                        "start_period": d_start,
                                         "room_id": alt_r["id"],
-                                        "displaced_by": req_id
+                                        "displaced_by": req_id,
+                                        "d_pers": d_pers
                                     })
                                     relocated = True
                                     break
@@ -236,11 +243,18 @@ class BookingSolver:
                             if relocation_ok:
                                 # Apply displacements
                                 for ovr in temp_overrides:
-                                    session_overrides.append(ovr)
+                                    session_overrides.append({
+                                        "session_id": ovr["session_id"],
+                                        "day": ovr["day"],
+                                        "start_period": ovr["start_period"],
+                                        "room_id": ovr["room_id"],
+                                        "displaced_by": ovr["displaced_by"]
+                                    })
                                     # Update room_busy
-                                    for p in pers:
-                                        room_busy[(rid, w_day, p)].remove(ovr["session_id"])
-                                        room_busy[(ovr["room_id"], w_day, p)].append(ovr["session_id"])
+                                    for p in ovr["d_pers"]:
+                                        if ovr["session_id"] in room_busy[(rid, ovr["day"], p)]:
+                                            room_busy[(rid, ovr["day"], p)].remove(ovr["session_id"])
+                                        room_busy[(ovr["room_id"], ovr["day"], p)].append(ovr["session_id"])
 
                                 # Place the institute event
                                 for p in pers:

@@ -9,10 +9,11 @@ from ortools.sat.python import cp_model
 
 
 class TimetableSolver:
-    def __init__(self, data, time_limit_seconds=None, num_workers=0):
+    def __init__(self, data, time_limit_seconds=None, num_workers=0, fast_mode=True):
         self.data = data
         self.time_limit_seconds = time_limit_seconds
         self.num_workers = num_workers
+        self.fast_mode = fast_mode
 
         self.days = data["calendar"]["days"]  # ['MON', 'TUE', 'WED', 'THU', 'FRI']
         self.day_indices = {d: i for i, d in enumerate(self.days)}
@@ -232,122 +233,123 @@ class TimetableSolver:
         # ------------------- Objective Formulation (Soft Penalties) -------------------
         obj_terms = []
 
-        # S1: Faculty preferences (avoid) - 2 points per hour in avoided period
-        for sid, cands in session_candidates.items():
-            s = self.sessions[sid]
-            fid = s["faculty_id"]
-            dur = s["duration"]
-            prefs = self.faculty[fid].get("preferences", [])
-            for (d, p, rid) in cands:
-                cost = 0
-                pers = range(p, p + dur)
-                for pref in prefs:
-                    if pref.get("type") == "avoid" and d in pref.get("days", self.days):
-                        cost += 2 * sum(1 for per in pers if per in pref.get("periods", []))
-                if cost > 0:
-                    obj_terms.append(cost * X[(sid, d, p, rid)])
+        if not self.fast_mode:
+            # S1: Faculty preferences (avoid) - 2 points per hour in avoided period
+            for sid, cands in session_candidates.items():
+                s = self.sessions[sid]
+                fid = s["faculty_id"]
+                dur = s["duration"]
+                prefs = self.faculty[fid].get("preferences", [])
+                for (d, p, rid) in cands:
+                    cost = 0
+                    pers = range(p, p + dur)
+                    for pref in prefs:
+                        if pref.get("type") == "avoid" and d in pref.get("days", self.days):
+                            cost += 2 * sum(1 for per in pers if per in pref.get("periods", []))
+                    if cost > 0:
+                        obj_terms.append(cost * X[(sid, d, p, rid)])
 
-        # S5: Room capacity < 40% - 1 point
-        for sid, cands in session_candidates.items():
-            s = self.sessions[sid]
-            for (d, p, rid) in cands:
-                r_cap = self.rooms[rid]["capacity"]
-                if r_cap > 0 and (s["size"] / r_cap) < 0.4:
-                    obj_terms.append(1 * X[(sid, d, p, rid)])
+            # S5: Room capacity < 40% - 1 point
+            for sid, cands in session_candidates.items():
+                s = self.sessions[sid]
+                for (d, p, rid) in cands:
+                    r_cap = self.rooms[rid]["capacity"]
+                    if r_cap > 0 and (s["size"] / r_cap) < 0.4:
+                        obj_terms.append(1 * X[(sid, d, p, rid)])
 
-        # S6: Class scheduled in P9 - 1 point
-        for sid, cands in session_candidates.items():
-            dur = self.sessions[sid]["duration"]
-            for (d, p, rid) in cands:
-                if 9 in range(p, p + dur):
-                    obj_terms.append(1 * X[(sid, d, p, rid)])
+            # S6: Class scheduled in P9 - 1 point
+            for sid, cands in session_candidates.items():
+                dur = self.sessions[sid]["duration"]
+                for (d, p, rid) in cands:
+                    if 9 in range(p, p + dur):
+                        obj_terms.append(1 * X[(sid, d, p, rid)])
 
-        # S4: Same course lecture twice in a day for student group - 3 points per duplicate
-        course_group_days = defaultdict(list)
-        for sid, cands in session_candidates.items():
-            s = self.sessions[sid]
-            if s["kind"] == "lecture" and not s.get("basket_slot"):
-                cid = s["course_id"]
-                for g in s["groups"]:
-                    for (d, p, rid) in cands:
-                        course_group_days[(cid, g, d)].append(X[(sid, d, p, rid)])
+            # S4: Same course lecture twice in a day for student group - 3 points per duplicate
+            course_group_days = defaultdict(list)
+            for sid, cands in session_candidates.items():
+                s = self.sessions[sid]
+                if s["kind"] == "lecture" and not s.get("basket_slot"):
+                    cid = s["course_id"]
+                    for g in s["groups"]:
+                        for (d, p, rid) in cands:
+                            course_group_days[(cid, g, d)].append(X[(sid, d, p, rid)])
 
-        for (cid, g, d), var_list in course_group_days.items():
-            if len(var_list) > 1:
-                dup_var = model.NewIntVar(0, len(var_list), f"dup_{cid}_{g}_{d}")
-                model.Add(dup_var >= sum(var_list) - 1)
-                obj_terms.append(3 * dup_var)
+            for (cid, g, d), var_list in course_group_days.items():
+                if len(var_list) > 1:
+                    dup_var = model.NewIntVar(0, len(var_list), f"dup_{cid}_{g}_{d}")
+                    model.Add(dup_var >= sum(var_list) - 1)
+                    obj_terms.append(3 * dup_var)
 
-        # S4 for basket courses:
-        basket_courses = defaultdict(set)
-        for b_slot, sids in self.basket_sessions.items():
-            for sid in sids:
-                basket_courses[self.sessions[sid]["course_id"]].add(b_slot)
+            # S4 for basket courses:
+            basket_courses = defaultdict(set)
+            for b_slot, sids in self.basket_sessions.items():
+                for sid in sids:
+                    basket_courses[self.sessions[sid]["course_id"]].add(b_slot)
 
-        for cid, b_slots in basket_courses.items():
-            for d in self.days:
-                active_vars = [basket_time_vars[(b, d, p)] for b in b_slots for p in self.periods]
-                if len(active_vars) > 1:
-                    b_dup = model.NewIntVar(0, len(active_vars), f"b_dup_{cid}_{d}")
-                    model.Add(b_dup >= sum(active_vars) - 1)
-                    obj_terms.append(3 * b_dup)
-
-        # S3: Student group class hours > 6 in a day - 3 points per hour over 6
-        group_day_hours = defaultdict(list)
-        for sid, cands in session_candidates.items():
-            s = self.sessions[sid]
-            dur = s["duration"]
-            if not s.get("basket_slot"):
-                for g in s["groups"]:
-                    for (d, p, rid) in cands:
-                        group_day_hours[(g, d)].append(dur * X[(sid, d, p, rid)])
-
-        for b_slot, sids in self.basket_sessions.items():
-            first_s = self.sessions[sids[0]]
-            dur = first_s["duration"]
-            for g in first_s["groups"]:
+            for cid, b_slots in basket_courses.items():
                 for d in self.days:
-                    for p in self.periods:
-                        group_day_hours[(g, d)].append(dur * basket_time_vars[(b_slot, d, p)])
+                    active_vars = [basket_time_vars[(b, d, p)] for b in b_slots for p in self.periods]
+                    if len(active_vars) > 1:
+                        b_dup = model.NewIntVar(0, len(active_vars), f"b_dup_{cid}_{d}")
+                        model.Add(b_dup >= sum(active_vars) - 1)
+                        obj_terms.append(3 * b_dup)
 
-        for (g, d), hr_vars in group_day_hours.items():
-            over_6 = model.NewIntVar(0, 9, f"over6_{g}_{d}")
-            model.Add(over_6 >= sum(hr_vars) - 6)
-            obj_terms.append(3 * over_6)
+            # S3: Student group class hours > 6 in a day - 3 points per hour over 6
+            group_day_hours = defaultdict(list)
+            for sid, cands in session_candidates.items():
+                s = self.sessions[sid]
+                dur = s["duration"]
+                if not s.get("basket_slot"):
+                    for g in s["groups"]:
+                        for (d, p, rid) in cands:
+                            group_day_hours[(g, d)].append(dur * X[(sid, d, p, rid)])
 
-        # S2: Gaps between classes on the same day for a student group (1 pt per gap period)
-        for g in self.groups:
-            for d in self.days:
-                # Active periods for (g, d)
-                day_t_vars = []
-                for t in self.periods:
-                    act_vars = group_period_activity.get((g, d, t), [])
-                    if act_vars:
-                        # act_vars sum <= 1 due to H3
-                        t_is_active = model.NewBoolVar(f"grp_act_{g}_{d}_{t}")
-                        model.Add(sum(act_vars) == t_is_active)
-                        day_t_vars.append((t, t_is_active))
+            for b_slot, sids in self.basket_sessions.items():
+                first_s = self.sessions[sids[0]]
+                dur = first_s["duration"]
+                for g in first_s["groups"]:
+                    for d in self.days:
+                        for p in self.periods:
+                            group_day_hours[(g, d)].append(dur * basket_time_vars[(b_slot, d, p)])
 
-                if day_t_vars:
-                    first_p = model.NewIntVar(1, 9, f"first_p_{g}_{d}")
-                    last_p = model.NewIntVar(1, 9, f"last_p_{g}_{d}")
-                    day_has_class = model.NewBoolVar(f"has_class_{g}_{d}")
+            for (g, d), hr_vars in group_day_hours.items():
+                over_6 = model.NewIntVar(0, 9, f"over6_{g}_{d}")
+                model.Add(over_6 >= sum(hr_vars) - 6)
+                obj_terms.append(3 * over_6)
 
-                    # If has_class is 0, sum of t_is_active is 0
-                    model.Add(sum(var for _, var in day_t_vars) >= 1).OnlyEnforceIf(day_has_class)
-                    model.Add(sum(var for _, var in day_t_vars) == 0).OnlyEnforceIf(day_has_class.Not())
+            # S2: Gaps between classes on the same day for a student group (1 pt per gap period)
+            for g in self.groups:
+                for d in self.days:
+                    # Active periods for (g, d)
+                    day_t_vars = []
+                    for t in self.periods:
+                        act_vars = group_period_activity.get((g, d, t), [])
+                        if act_vars:
+                            # act_vars sum <= 1 due to H3
+                            t_is_active = model.NewBoolVar(f"grp_act_{g}_{d}_{t}")
+                            model.Add(sum(act_vars) == t_is_active)
+                            day_t_vars.append((t, t_is_active))
 
-                    for t, t_var in day_t_vars:
-                        model.Add(first_p <= t).OnlyEnforceIf(t_var)
-                        model.Add(last_p >= t).OnlyEnforceIf(t_var)
+                    if day_t_vars:
+                        first_p = model.NewIntVar(1, 9, f"first_p_{g}_{d}")
+                        last_p = model.NewIntVar(1, 9, f"last_p_{g}_{d}")
+                        day_has_class = model.NewBoolVar(f"has_class_{g}_{d}")
 
-                    span = model.NewIntVar(0, 9, f"span_{g}_{d}")
-                    model.Add(span >= last_p - first_p + 1).OnlyEnforceIf(day_has_class)
-                    model.Add(span == 0).OnlyEnforceIf(day_has_class.Not())
+                        # If has_class is 0, sum of t_is_active is 0
+                        model.Add(sum(var for _, var in day_t_vars) >= 1).OnlyEnforceIf(day_has_class)
+                        model.Add(sum(var for _, var in day_t_vars) == 0).OnlyEnforceIf(day_has_class.Not())
 
-                    gap = model.NewIntVar(0, 9, f"gap_{g}_{d}")
-                    model.Add(gap >= span - sum(var for _, var in day_t_vars))
-                    obj_terms.append(1 * gap)
+                        for t, t_var in day_t_vars:
+                            model.Add(first_p <= t).OnlyEnforceIf(t_var)
+                            model.Add(last_p >= t).OnlyEnforceIf(t_var)
+
+                        span = model.NewIntVar(0, 9, f"span_{g}_{d}")
+                        model.Add(span >= last_p - first_p + 1).OnlyEnforceIf(day_has_class)
+                        model.Add(span == 0).OnlyEnforceIf(day_has_class.Not())
+
+                        gap = model.NewIntVar(0, 9, f"gap_{g}_{d}")
+                        model.Add(gap >= span - sum(var for _, var in day_t_vars))
+                        obj_terms.append(1 * gap)
 
         # Stability Objective (if baseline provided for disruption/rescheduling)
         if baseline:
@@ -363,10 +365,13 @@ class TimetableSolver:
                             obj_terms.append(stability_weight_room * var)
 
         # Minimize total objective
-        model.Minimize(sum(obj_terms))
+        if obj_terms:
+            model.Minimize(sum(obj_terms))
 
         # Solve
         solver = cp_model.CpSolver()
+        if self.fast_mode:
+            solver.parameters.stop_after_first_solution = True
         if self.time_limit_seconds is not None and self.time_limit_seconds > 0:
             solver.parameters.max_time_in_seconds = float(self.time_limit_seconds)
         if self.num_workers and self.num_workers > 0:
