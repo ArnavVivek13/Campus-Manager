@@ -510,15 +510,28 @@ export default function CampusManager() {
     setConfirmingBooking(true)
     try {
       const token = localStorage.getItem('auth_token')
+      const timeToPeriod = (t?: string): number => {
+        if (!t) return 10
+        const h = parseInt(t.split(':')[0], 10)
+        if (isNaN(h)) return 10
+        const map: Record<number, number> = {
+          8: 1, 9: 2, 10: 3, 11: 4, 12: 5,
+          14: 6, 15: 7, 16: 8, 17: 9,
+          18: 10, 19: 11, 20: 12, 21: 13
+        }
+        return map[h] ?? (h >= 18 ? 10 : h <= 12 ? Math.max(1, h - 7) : 9)
+      }
+      const startP = timeToPeriod(bookingForm.start_time)
+      const dur = Number(bookingForm.duration_periods) || 1
       const payload = {
         requester: currentUser?.full_name || 'Campus User',
         title: bookingForm.title.trim() || parsedData?.title || bookingText || 'Event Request',
         attendance: Number(bookingForm.attendance) || 100,
-        duration_periods: Number(bookingForm.duration_periods) || 1,
+        duration_periods: dur,
         windows: [{
           day: bookingForm.day || 'MON',
-          from_period: 10,
-          to_period: 10 + (Number(bookingForm.duration_periods) || 1) - 1,
+          from_period: startP,
+          to_period: startP + dur - 1,
           start_time: bookingForm.start_time || '18:00'
         }],
         room_types: parsedData?.room_types?.length ? parsedData.room_types : ['auditorium', 'seminar_hall'],
@@ -1012,6 +1025,18 @@ export default function CampusManager() {
     localStorage.removeItem('auth_user')
     setCurrentUser(null)
     setNotice('Signed out successfully.')
+    // Reset booking draft so state does not leak to other users
+    setBookingText('')
+    setParsed(false)
+    setParsedData(null)
+    setBookingForm({
+      title: '',
+      attendance: 100,
+      duration_periods: 1,
+      day: 'MON',
+      start_time: '18:00',
+      requested_room: 'AUD'
+    })
   }
 
   if (authLoading) {
@@ -1043,6 +1068,18 @@ export default function CampusManager() {
           }
           setRole(roleLabelMap[user.role] || user.role)
           setNotice(`Welcome, ${user.full_name}`)
+          // Reset previous drafts upon signing in with new credentials
+          setBookingText('')
+          setParsed(false)
+          setParsedData(null)
+          setBookingForm({
+            title: '',
+            attendance: 100,
+            duration_periods: 1,
+            day: 'MON',
+            start_time: '18:00',
+            requested_room: 'AUD'
+          })
         }}
         dark={dark}
         setDark={setDark}

@@ -1096,7 +1096,20 @@ def create_db_booking(
 
     first_win = req.windows[0] if req.windows else {"day": "MON", "from_period": 10, "to_period": 11}
     day_val = first_win.get("day", "MON")
-    from_p = first_win.get("from_period", 10)
+    from_p = first_win.get("from_period")
+    start_time_str = first_win.get("start_time")
+    if start_time_str:
+        try:
+            h = int(start_time_str.split(":")[0])
+            from_p = {
+                8: 1, 9: 2, 10: 3, 11: 4, 12: 5, 13: 5,
+                14: 6, 15: 7, 16: 8, 17: 9,
+                18: 10, 19: 11, 20: 12, 21: 13, 22: 13
+            }.get(h, from_p if from_p is not None else 10)
+        except Exception:
+            pass
+    if from_p is None:
+        from_p = 10
     to_p = first_win.get("to_period", from_p + req.duration_periods - 1)
 
     # Duplicate Prevention Check 1: Event Name

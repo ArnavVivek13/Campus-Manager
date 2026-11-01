@@ -32,9 +32,15 @@ class ParsedBookingRequest(BaseModel):
 # P1: 8-9, P2: 9-10, P3: 10-11, P4: 11-12, P5: 12-13, Lunch: 13-14, P6: 14-15, P7: 15-16, P8: 16-17, P9: 17-18
 # Evening event periods: P10: 18-19, P11: 19-20, P12: 20-21, P13: 21-22
 HOUR_TO_PERIOD = {
-    8: 1, 9: 2, 10: 3, 11: 4, 12: 5,
+    8: 1, 9: 2, 10: 3, 11: 4, 12: 5, 13: 5,
     14: 6, 15: 7, 16: 8, 17: 9,
-    18: 10, 19: 11, 20: 12, 21: 13
+    18: 10, 19: 11, 20: 12, 21: 13, 22: 13
+}
+
+PERIOD_TO_TIME = {
+    1: "08:00", 2: "09:00", 3: "10:00", 4: "11:00", 5: "12:00",
+    6: "14:00", 7: "15:00", 8: "16:00", 9: "17:00",
+    10: "18:00", 11: "19:00", 12: "20:00", 13: "21:00"
 }
 
 DAYS_MAP = {
@@ -134,27 +140,47 @@ def rule_based_fallback_parser(text: str) -> ParsedBookingRequest:
                 break
 
     # Day determination
-    day = "MON"
+    day = None
     for d_key, d_val in DAYS_MAP.items():
         if re.search(rf"\b{d_key}\b", lower):
             day = d_val
             break
-    if "kal" in lower:
-        # Tomorrow (default to TUE if not specified)
-        day = "TUE"
-        notes.append("Interpreted 'kal' as Tuesday.")
+
+    # Next weekday logic for "tomorrow", "kal", "next day":
+    if re.search(r"\b(kal|tomorrow|next day|agli subah)\b", lower):
+        # 0=MON, 1=TUE, 2=WED, 3=THU, 4=FRI, 5=SAT, 6=SUN
+        weekday = datetime.now().weekday()
+        next_day_idx = (weekday + 1) % 7
+        # If Saturday (5) or Sunday (6), roll forward to Monday (0)
+        if next_day_idx in (5, 6):
+            target_idx = 0
+            notes.append("Tomorrow falls on a weekend; automatically shifted to next weekday (Monday).")
+        else:
+            target_idx = next_day_idx
+            notes.append("Interpreted 'tomorrow/kal' as the next business weekday.")
+        idx_to_day = {0: "MON", 1: "TUE", 2: "WED", 3: "THU", 4: "FRI"}
+        day = idx_to_day.get(target_idx, "MON")
+
+    if not day:
+        day = "MON"
 
     # Time / Window determination
-    from_p = 10  # default evening
+    from_p = 10  # default evening (18:00)
     to_p = from_p + dur - 1
 
-    time_range_m = re.search(r"(\d+)\s*(?:to|-)\s*(\d+)\s*(pm|am)?", lower)
-    single_time_m = re.search(r"(?:at|@)\s*(\d+)\s*(am|pm)", lower)
+    # Check various time formats:
+    # 1. Ranges: e.g. "17:00 to 18:00", "5pm to 6pm", "5 to 6 pm", "5-6 pm"
+    time_range_m = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(?:to|-)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", lower)
+    # 2. 24-hr single time: e.g. "17:00", "14:30", "18:00"
+    time_24_m = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", lower)
+    # 3. 12-hr single time: e.g. "5pm", "5 pm", "at 5 pm", "shaam 5", "5 baje", "10 am"
+    time_12_m = re.search(r"(?:at|@|shaam|subah)?\s*(\d{1,2})\s*(am|pm|baje)\b", lower)
 
-    if time_range_m:
+    if time_range_m and ("to" in lower or "-" in lower):
         h1 = int(time_range_m.group(1))
-        h2 = int(time_range_m.group(2))
-        is_pm = (time_range_m.group(3) == "pm") or (h1 >= 1 and h1 <= 9 and "pm" in lower) or h1 >= 6
+        h2 = int(time_range_m.group(3))
+        merid = time_range_m.group(5)
+        is_pm = (merid == "pm") or ("pm" in lower) or ("shaam" in lower) or ("evening" in lower) or h1 >= 12
         if is_pm and h1 < 12:
             h1 += 12
         if is_pm and h2 < 12:
@@ -162,22 +188,36 @@ def rule_based_fallback_parser(text: str) -> ParsedBookingRequest:
         from_p = HOUR_TO_PERIOD.get(h1, 10)
         to_p = HOUR_TO_PERIOD.get(h2, from_p + dur) - 1
         dur = max(1, to_p - from_p + 1)
-    elif single_time_m:
-        h = int(single_time_m.group(1))
-        is_pm = (single_time_m.group(2) == "pm")
-        if is_pm and h < 12:
-            h += 12
-        from_p = HOUR_TO_PERIOD.get(h, 3)
+    elif time_24_m:
+        h = int(time_24_m.group(1))
+        from_p = HOUR_TO_PERIOD.get(h, 9 if h == 17 else 10)
         to_p = from_p + dur - 1
-    elif "after lunch" in lower or "afternoon" in lower:
+    elif time_12_m:
+        h = int(time_12_m.group(1))
+        mod = time_12_m.group(2)
+        if mod == "pm" or "shaam" in lower or "evening" in lower or (mod == "baje" and h in (4, 5, 6, 7, 8, 9)):
+            if h < 12:
+                h += 12
+        from_p = HOUR_TO_PERIOD.get(h, 10)
+        to_p = from_p + dur - 1
+    elif "after lunch" in lower or "afternoon" in lower or "dopahar" in lower:
         from_p = 6
         to_p = from_p + dur - 1
         notes.append("Assumed 'after lunch' / 'afternoon' starts at P6 (14:00).")
-    elif "evening" in lower or "shaam 6" in lower or "6 pm" in lower:
+    elif "evening" in lower or "shaam" in lower:
         from_p = 10
         to_p = from_p + dur - 1
+    elif "morning" in lower or "subah" in lower:
+        from_p = 2
+        to_p = from_p + dur - 1
 
-    windows.append({"day": day, "from_period": from_p, "to_period": to_p})
+    start_time_str = PERIOD_TO_TIME.get(from_p, "18:00")
+    windows.append({
+        "day": day,
+        "from_period": from_p,
+        "to_period": to_p,
+        "start_time": start_time_str
+    })
 
     # Missing critical info
     if att is None:
