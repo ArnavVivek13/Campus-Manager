@@ -691,13 +691,27 @@ export default function CampusManager() {
         showToast('Dataset uploaded — solver is running...', 'info')
         const jobId = data.job_id
         let attempts = 0
-        const maxAttempts = 300 // 5 minutes at 1s intervals
+        const maxAttempts = 60 // 60 attempts * 8s = 8 minutes max
+        let consecutiveErrors = 0
+        const maxConsecutiveErrors = 5
+
         while (attempts < maxAttempts) {
-          await new Promise(r => setTimeout(r, 2000))
+          await new Promise(r => setTimeout(r, 8000))
           attempts++
           try {
             const pollRes = await fetch(`${API_BASE}/api/admin/load-dataset/status/${jobId}`)
+            if (!pollRes.ok) {
+              consecutiveErrors++
+              if (consecutiveErrors >= maxConsecutiveErrors) {
+                throw new Error(`Server returned HTTP ${pollRes.status} after ${maxConsecutiveErrors} retries.`)
+              }
+              showToast(`Solver in progress... (waiting for server, retry ${consecutiveErrors}/${maxConsecutiveErrors})`, 'info')
+              continue
+            }
+
             const pollData = await pollRes.json()
+            consecutiveErrors = 0 // reset on any successful poll response
+
             if (pollData.status === 'completed') {
               const result = pollData.result || {}
               setNotice(`${result.message || 'Dataset loaded.'} Timetable verified with 0 hard violations.`)
@@ -711,16 +725,21 @@ export default function CampusManager() {
             } else if (pollData.status === 'failed') {
               throw new Error(pollData.error || 'Solver failed.')
             }
+
             // Still processing — update toast with progress
             if (pollData.progress) {
               showToast(`Solving: ${pollData.progress}`, 'info')
             }
           } catch (pollErr: any) {
-            throw new Error(pollErr.message || 'Error polling solver status.')
+            consecutiveErrors++
+            if (consecutiveErrors >= maxConsecutiveErrors) {
+              throw new Error(pollErr.message || `Failed to reach server after ${maxConsecutiveErrors} retries.`)
+            }
+            showToast(`Server is computing... (retry ${consecutiveErrors}/${maxConsecutiveErrors})`, 'info')
           }
         }
         if (attempts >= maxAttempts) {
-          throw new Error('Solver timed out after 5 minutes. The dataset may be too large for the current server.')
+          throw new Error('Solver timed out after 8 minutes. The dataset may be too large for the current server.')
         }
       } else {
         // Legacy synchronous response (backward compat)

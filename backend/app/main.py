@@ -438,7 +438,7 @@ def preview_sample_disruption(db: Session = Depends(get_db)):
         for s in STATE["schedule"].get("sessions", [])
     }
 
-    t_solver = TimetableSolver(dis_data, time_limit_seconds=None, num_workers=0)
+    t_solver = TimetableSolver(dis_data, time_limit_seconds=None, num_workers=1)
     re_res = t_solver.solve(baseline=baseline_tuples, stability_weight_time=100000, stability_weight_room=1000)
     if not re_res["solvable"]:
         # Fallback with relaxed stability weights in case of tight time limit
@@ -536,7 +536,7 @@ async def upload_disruption_endpoint(file: UploadFile = File(None), db: Session 
             for s in STATE["schedule"].get("sessions", [])
         }
 
-        t_solver = TimetableSolver(dis_data, time_limit_seconds=None, num_workers=0)
+        t_solver = TimetableSolver(dis_data, time_limit_seconds=None, num_workers=1)
         re_res = t_solver.solve(baseline=baseline_tuples, stability_weight_time=100000, stability_weight_room=1000)
         if not re_res["solvable"]:
             # Fallback with relaxed stability weights in case of tight time limit
@@ -726,7 +726,7 @@ def apply_individual_disruption_moves(payload: DisruptionDecisionPayload, db: Se
                 s["session_id"]: (s["day"], s["start_period"], s["room_id"])
                 for s in STATE["schedule"].get("sessions", [])
             }
-            t_solver = TimetableSolver(dis_data, time_limit_seconds=None, num_workers=0)
+            t_solver = TimetableSolver(dis_data, time_limit_seconds=None, num_workers=1)
             re_res = t_solver.solve(
                 baseline=baseline_tuples,
                 stability_weight_time=100000,
@@ -922,8 +922,8 @@ def _run_solver_job(job_id: str, new_data: dict):
     try:
         SOLVER_JOBS[job_id]["progress"] = "Solving timetable..."
 
-        # Solve Master Timetable (fast_mode skips soft-penalty optimization for speed)
-        t_solver = TimetableSolver(new_data, time_limit_seconds=600.0, num_workers=0, fast_mode=True)
+        # Solve Master Timetable (fast_mode skips soft-penalty optimization for speed; 1 worker prevents thread thrashing on 0.1 vCPU)
+        t_solver = TimetableSolver(new_data, time_limit_seconds=600.0, num_workers=1, fast_mode=True)
         t_res = t_solver.solve()
         if not t_res["solvable"]:
             SOLVER_JOBS[job_id]["status"] = "failed"
@@ -934,7 +934,7 @@ def _run_solver_job(job_id: str, new_data: dict):
         SOLVER_JOBS[job_id]["progress"] = "Solving exam schedule..."
 
         # Solve Exams
-        e_solver = ExamSolver(new_data, time_limit_seconds=120.0, num_workers=0)
+        e_solver = ExamSolver(new_data, time_limit_seconds=120.0, num_workers=1)
         exams = e_solver.solve()
 
         SOLVER_JOBS[job_id]["progress"] = "Solving fest bookings..."
