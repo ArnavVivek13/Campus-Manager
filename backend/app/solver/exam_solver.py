@@ -12,7 +12,7 @@ from ortools.sat.python import cp_model
 
 
 class ExamSolver:
-    def __init__(self, data, time_limit_seconds=20.0, num_workers=8):
+    def __init__(self, data, time_limit_seconds=None, num_workers=0):
         self.data = data
         self.time_limit_seconds = time_limit_seconds
         self.num_workers = num_workers
@@ -102,8 +102,10 @@ class ExamSolver:
         model.Minimize(sum(obj_terms))
 
         solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = self.time_limit_seconds
-        solver.parameters.num_workers = self.num_workers
+        if self.time_limit_seconds is not None and self.time_limit_seconds > 0:
+            solver.parameters.max_time_in_seconds = float(self.time_limit_seconds)
+        if self.num_workers and self.num_workers > 0:
+            solver.parameters.num_workers = int(self.num_workers)
         status = solver.Solve(model)
 
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):

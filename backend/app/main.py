@@ -436,7 +436,7 @@ def preview_sample_disruption(db: Session = Depends(get_db)):
         for s in STATE["schedule"].get("sessions", [])
     }
 
-    t_solver = TimetableSolver(dis_data, time_limit_seconds=15.0, num_workers=8)
+    t_solver = TimetableSolver(dis_data, time_limit_seconds=None, num_workers=0)
     re_res = t_solver.solve(baseline=baseline_tuples, stability_weight_time=100000, stability_weight_room=1000)
     if not re_res["solvable"]:
         # Fallback with relaxed stability weights in case of tight time limit
@@ -534,7 +534,7 @@ async def upload_disruption_endpoint(file: UploadFile = File(None), db: Session 
             for s in STATE["schedule"].get("sessions", [])
         }
 
-        t_solver = TimetableSolver(dis_data, time_limit_seconds=15.0, num_workers=8)
+        t_solver = TimetableSolver(dis_data, time_limit_seconds=None, num_workers=0)
         re_res = t_solver.solve(baseline=baseline_tuples, stability_weight_time=100000, stability_weight_room=1000)
         if not re_res["solvable"]:
             # Fallback with relaxed stability weights in case of tight time limit
@@ -724,7 +724,7 @@ def apply_individual_disruption_moves(payload: DisruptionDecisionPayload, db: Se
                 s["session_id"]: (s["day"], s["start_period"], s["room_id"])
                 for s in STATE["schedule"].get("sessions", [])
             }
-            t_solver = TimetableSolver(dis_data, time_limit_seconds=10.0, num_workers=8)
+            t_solver = TimetableSolver(dis_data, time_limit_seconds=None, num_workers=0)
             re_res = t_solver.solve(
                 baseline=baseline_tuples,
                 stability_weight_time=100000,
@@ -933,15 +933,15 @@ async def load_dataset_endpoint(file: UploadFile = File(None), db: Session = Dep
             raise HTTPException(status_code=422, detail=f"Missing required dataset section: '{k}'")
 
     try:
-        # Solve Master Timetable
-        t_solver = TimetableSolver(new_data, time_limit_seconds=30.0)
+        # Solve Master Timetable (no timeout: deterministic termination)
+        t_solver = TimetableSolver(new_data, time_limit_seconds=None, num_workers=0)
         t_res = t_solver.solve()
         if not t_res["solvable"]:
             raise HTTPException(status_code=422, detail=f"Dataset is unsolvable with 0 hard violations: {t_res.get('conflicts')}")
         assign = t_res["assignment"]
 
-        # Solve Exams
-        e_solver = ExamSolver(new_data, time_limit_seconds=15.0)
+        # Solve Exams (no timeout: deterministic termination)
+        e_solver = ExamSolver(new_data, time_limit_seconds=None, num_workers=0)
         exams = e_solver.solve()
 
         # Solve Bookings
