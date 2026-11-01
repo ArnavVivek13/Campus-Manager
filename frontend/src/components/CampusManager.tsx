@@ -523,7 +523,8 @@ export default function CampusManager() {
       const token = localStorage.getItem('auth_token')
       const timeToPeriod = (t?: string): number => {
         if (!t) return 10
-        const h = parseInt(t.split(':')[0], 10)
+        const hourStr = t.split(':')[0] ?? '10'
+        const h = parseInt(hourStr, 10)
         if (isNaN(h)) return 10
         const map: Record<number, number> = {
           8: 1, 9: 2, 10: 3, 11: 4, 12: 5,
