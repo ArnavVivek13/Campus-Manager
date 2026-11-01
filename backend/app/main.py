@@ -162,8 +162,26 @@ def load_initial_state():
     STATE["active_view"] = "baseline"
 
 
-# Initialize on startup with empty data (Admin loads or restores baseline)
-set_empty_state()
+def init_startup_state():
+    """
+    On server restart or redeploy, restore the active schedule and dataset from the DBMS
+    if one exists, ensuring state persistence. Only defaults to empty if the DB has no active dataset.
+    """
+    db = SessionLocal()
+    try:
+        active_ds = db.query(DatasetState).filter(DatasetState.is_active == True).first()
+        if active_ds:
+            load_initial_state()
+        else:
+            set_empty_state()
+    except Exception as e:
+        print(f"[Warning] Failed to restore startup state from DB: {e}")
+        set_empty_state()
+    finally:
+        db.close()
+
+
+init_startup_state()
 
 
 # --- Models ---
