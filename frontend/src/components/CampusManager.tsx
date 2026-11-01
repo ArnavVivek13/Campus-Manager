@@ -1,6 +1,6 @@
 import React from 'react'
 import { useEffect, useMemo, useState, useRef } from 'react'
-import { AlertTriangle, Bot, CalendarDays, Check, ChevronRight, CircleCheck, Clock3, Command, DoorOpen, GitCompareArrows, GraduationCap, MessageSquareText, MoreHorizontal, PanelLeft, Pencil, RotateCcw, Send, SlidersHorizontal, Sparkles, Users, X, Menu, Moon, Sun, Loader2, History, CheckCircle2, XCircle, ArrowRight, LogOut, Lock, Mail, Eye, EyeOff, ShieldCheck, UserPlus, Download, Upload, Trash2, UserCheck, UserX, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Bot, CalendarDays, Check, ChevronRight, CircleCheck, Clock3, Command, DoorOpen, GitCompareArrows, GraduationCap, MoreHorizontal, PanelLeft, RotateCcw, Send, SlidersHorizontal, Sparkles, Users, X, Menu, Moon, Sun, Loader2, History, CheckCircle2, XCircle, ArrowRight, LogOut, Lock, Mail, Eye, EyeOff, ShieldCheck, UserPlus, Download, Upload, Trash2, UserCheck, UserX, RefreshCw } from 'lucide-react'
 
 export const getApiBase = (): string => {
   if (typeof window !== 'undefined') {
@@ -105,11 +105,7 @@ const defaultExams = [
   ['SAT', 'PM', 'CS204', 'Data Structures Lab', 'CSE-2', 'LAB-1 · LAB-2'],
 ]
 
-const defaultMoves = [
-  ['SES-04', 'CS204 · Data Structures Lab', 'Mon 12:00–15:00 · LAB-1', 'Mon 12:00–15:00 · LAB-2'],
-  ['SES-05', 'CS207 · AI Fundamentals', 'Tue 09:00 · LAB-1', 'Tue 09:00 · LAB-2'],
-  ['SES-06', 'ME201 · Manufacturing Lab', 'Tue 09:00 · LAB-1', 'Tue 09:00 · LAB-3']
-]
+const defaultMoves: string[][] = []
 
 const fmt = (h: number) => `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`
 
@@ -2206,24 +2202,28 @@ function Disruption({
           <div className={`flex flex-wrap items-center justify-between gap-4 rounded-none border border-timetable-grid p-5 ${hue.periwinkle}`}>
             <div>
               <div className="flex items-center gap-2">
-                <p className="text-sm font-medium">Simulate or apply campus disruptions</p>
+                <p className="text-sm font-medium">Disruption Resolution Studio</p>
                 {isCommitted ? (
                   <span className="rounded-full bg-success px-2.5 py-0.5 text-[11px] font-semibold text-white">
                     ✓ Committed & Live
                   </span>
+                ) : moves.length > 0 ? (
+                  <span className="rounded-full bg-card px-2.5 py-0.5 text-[11px] font-medium text-foreground/80 border border-timetable-grid">
+                    Draft Simulation ({moves.length} moves)
+                  </span>
                 ) : (
                   <span className="rounded-full bg-card px-2.5 py-0.5 text-[11px] font-medium text-foreground/80 border border-timetable-grid">
-                    Draft Simulation
+                    Ready for Disruption Dataset
                   </span>
                 )}
               </div>
               <p className="mt-1 text-[13px] opacity-75">
-                Faculty leave, room closure, and extra sessions. Active closure: LAB-1.
+                Upload your disruption dataset (room closures, faculty leaves, or new sessions) to solve minimal-displacement timetable repairs.
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1.5 rounded-full border border-timetable-grid bg-card px-3.5 py-2 text-xs font-semibold text-foreground hover:bg-muted transition cursor-pointer shadow-sm">
-                <Upload className="size-3.5 text-muted-foreground" />
+              <label className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition cursor-pointer shadow-sm">
+                <Upload className="size-4" />
                 <span>{isLoading ? 'Solving Disruption...' : 'Upload Disruption JSON'}</span>
                 <input
                   type="file"
@@ -2233,16 +2233,43 @@ function Disruption({
                   disabled={isLoading}
                 />
               </label>
-              <button
-                onClick={onPreview}
-                disabled={isLoading}
-                className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-ink-foreground hover:opacity-90 transition disabled:opacity-50"
-              >
-                <GitCompareArrows className="size-4" />
-                {isLoading ? 'Calculating Minimal Moves...' : preview ? 'Hide diff' : 'Simulate LAB-1 Closure'}
-              </button>
+              {moves.length > 0 && (
+                <button
+                  onClick={onPreview}
+                  disabled={isLoading}
+                  className="flex items-center gap-2 rounded-full border border-timetable-grid bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition disabled:opacity-50"
+                >
+                  <GitCompareArrows className="size-4" />
+                  {preview ? 'Hide diff' : 'View diff'}
+                </button>
+              )}
             </div>
           </div>
+
+          {!preview && moves.length === 0 && (
+            <div className="mt-5 grid min-h-60 place-items-center rounded-none border border-dashed border-timetable-grid p-8 text-center bg-card/40">
+              <div className="max-w-md">
+                <Upload className="mx-auto size-7 text-muted-foreground" />
+                <p className="mt-3 text-sm font-medium text-foreground">Upload Disruption JSON</p>
+                <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
+                  Upload an official disruption JSON file specifying room closures, faculty leave, or added sessions. The solver computes minimal perturbations preserving timetable stability.
+                </p>
+                <div className="mt-4">
+                  <label className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-ink-foreground hover:opacity-90 transition cursor-pointer shadow-sm">
+                    <Upload className="size-3.5" />
+                    <span>Select Disruption File</span>
+                    <input
+                      type="file"
+                      accept=".json"
+                      className="hidden"
+                      onChange={onUploadDisruption}
+                      disabled={isLoading}
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+          )}
 
           {preview ? (
             <>
@@ -2537,7 +2564,7 @@ function Assistant({
 }) {
   return <div>
     <Heading title="AI Booking Assistant" />
-    <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
+    <div className="max-w-4xl">
       <Panel className="overflow-hidden">
         <div className={`p-6 ${hue.violet}`}><div className="flex items-center gap-2 text-xs font-medium"><Bot className="size-4" />Venue booking assistant</div><h3 className="mt-3 text-xl font-medium tracking-tight">Tell us what you need. We&apos;ll find the best fit.</h3><p className="mt-2 max-w-xl text-[13px] leading-5 opacity-75">Describe your event in plain English or Hinglish. The assistant reads the requirements and checks venue availability.</p></div>
         <div className="p-5">
@@ -2655,10 +2682,6 @@ function Assistant({
           </div>}
         </div>
       </Panel>
-      <div className="flex flex-col gap-4">
-        <Panel className="p-5"><div className="flex items-center gap-2 text-sm font-medium"><MessageSquareText className="size-4" />Recent requests</div><div className="mt-4 flex flex-col gap-2">{([['Seminar Hall · tomorrow 18:00', 'mint'], ['Auditorium · Fri 09:00', 'peach'], ['LH-2 · next Monday', 'sky']] as [string, Hue][]).map(([t, h]) => <div key={t} className={`rounded-none border border-timetable-grid p-3 ${hue[h]}`}><p className="text-[13px] font-medium">{t}</p><p className="mt-0.5 text-[11px] opacity-75">Awaiting approval</p></div>)}</div></Panel>
-        <Panel className="p-5"><div className="flex items-center gap-2 text-sm font-medium"><Pencil className="size-4" />Available venues</div><div className="mt-4 flex flex-col gap-2 text-[13px]">{venuesList.map(v => <div key={v[0]} className="flex items-center justify-between rounded-md bg-muted px-3 py-2"><span><b className="font-medium">{v[0]}</b><span className="ml-2 text-muted-foreground">{v[1]}</span></span><span className={`rounded-full px-2 py-0.5 text-[11px] ${v[2] === 'Available' ? 'bg-success-soft text-success' : 'bg-warning-soft text-warning'}`}>{v[2]}</span></div>)}</div></Panel>
-      </div>
     </div>
   </div>
 }
