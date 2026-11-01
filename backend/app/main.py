@@ -819,9 +819,14 @@ def get_disruption_history(db: Session = Depends(get_db)):
 
 
 @app.post("/api/disruption/rollback/{log_id}")
-def rollback_disruption(log_id: int, db: Session = Depends(get_db)):
+def rollback_disruption(
+    log_id: int,
+    current_user: User = Depends(require_role(RoleEnum.ADMIN)),
+    db: Session = Depends(get_db)
+):
     """
     Rolls back timetable state to an earlier historical disruption snapshot.
+    Enforces that only Admin users can perform state rollback by design.
     """
     target_log = db.query(DisruptionLog).filter(DisruptionLog.id == log_id).first()
     if not target_log:
@@ -838,8 +843,8 @@ def rollback_disruption(log_id: int, db: Session = Depends(get_db)):
         disruption_type="STATE_ROLLBACK",
         affected_entity=target_log.affected_entity or "SCHEDULE",
         action="ROLLBACK",
-        summary=f"Rolled back state to Log #{log_id} ({target_log.summary or 'snapshot'})",
-        moves_json=json.dumps([{"rollback_to_log_id": log_id}]),
+        summary=f"Rolled back state to Log #{log_id} ({target_log.summary or 'snapshot'}) by Admin {current_user.full_name}",
+        moves_json=json.dumps([{"rollback_to_log_id": log_id, "admin_id": current_user.id}]),
         schedule_snapshot_json=json.dumps(STATE["schedule_after"] if STATE["active_view"] == "after_disruption" else STATE["schedule"])
     )
     db.add(new_log)
@@ -854,7 +859,10 @@ def rollback_disruption(log_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/disruption/revert")
-def revert_disruption(db: Session = Depends(get_db)):
+def revert_disruption(
+    current_user: User = Depends(require_role(RoleEnum.ADMIN)),
+    db: Session = Depends(get_db)
+):
     """Admin reverts active timetable back to clean baseline schedule."""
     STATE["active_view"] = "baseline"
     try:
@@ -862,7 +870,7 @@ def revert_disruption(db: Session = Depends(get_db)):
             disruption_type="REVERT_TO_BASELINE",
             affected_entity="SCHEDULE",
             action="REVERT",
-            summary="Reverted timetable to clean baseline schedule",
+            summary=f"Reverted timetable to clean baseline schedule by Admin {current_user.full_name}",
             moves_json="[]",
             schedule_snapshot_json=json.dumps(STATE["schedule"])
         )
@@ -878,10 +886,14 @@ def revert_disruption(db: Session = Depends(get_db)):
 
 
 @app.post("/api/admin/clear-data")
-def clear_all_data(db: Session = Depends(get_db)):
+def clear_all_data(
+    current_user: User = Depends(require_role(RoleEnum.ADMIN)),
+    db: Session = Depends(get_db)
+):
     """
     Clears all current data from all SQL database tables and in-memory schedule tables.
     Leaves user accounts intact but resets timetable, sessions, exams, bookings, rooms, groups.
+    Enforces that only Admin users can clear operational data by design.
     """
     clear_db_data(db)
     set_empty_state()
@@ -901,10 +913,14 @@ def clear_all_data(db: Session = Depends(get_db)):
 
 @app.post("/api/admin/reset")
 @app.post("/api/admin/restore-baseline")
-def reset_demo_data(db: Session = Depends(get_db)):
+def reset_demo_data(
+    current_user: User = Depends(require_role(RoleEnum.ADMIN)),
+    db: Session = Depends(get_db)
+):
     """
     Restores the starter pack dataset and solves baseline schedule.
     Also populates SQL DBMS baseline records.
+    Enforces that only Admin users can restore baseline data by design.
     """
     load_initial_state()
     seed_baseline_records(db)

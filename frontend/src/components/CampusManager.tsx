@@ -610,7 +610,13 @@ export default function CampusManager() {
 
   const handleClearData = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/clear-data`, { method: 'POST' })
+      const token = localStorage.getItem('auth_token')
+      const res = await fetch(`${API_BASE}/api/admin/clear-data`, {
+        method: 'POST',
+        headers: {
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        }
+      })
       if (res.ok) {
         setSessionsList([])
         setExamsList([])
@@ -628,20 +634,24 @@ export default function CampusManager() {
         ])
         setNotice('All current data has been successfully cleared from all tables.')
         showToast('All timetable, exam, and booking data cleared successfully.', 'success')
+      } else {
+        const err = await res.json().catch(() => ({}))
+        showToast(err.detail || 'Clear data failed: Admin access required', 'error')
       }
     } catch {
-      setSessionsList([])
-      setExamsList([])
-      setBookingsList([])
-      setDisruptionMoves([])
-      setNotice('All tables cleared in local state.')
-      showToast('All tables cleared in local state.', 'info')
+      showToast('Error communicating with server.', 'error')
     }
   }
 
   const handleRestoreBaseline = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/restore-baseline`, { method: 'POST' })
+      const token = localStorage.getItem('auth_token')
+      const res = await fetch(`${API_BASE}/api/admin/restore-baseline`, {
+        method: 'POST',
+        headers: {
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        }
+      })
       if (res.ok) {
         setActiveView('baseline')
         localStorage.setItem('active_view', 'baseline')
@@ -653,11 +663,12 @@ export default function CampusManager() {
         fetchExams()
         fetchBookings()
         fetchDisruptionHistory()
+      } else {
+        const err = await res.json().catch(() => ({}))
+        showToast(err.detail || 'Restore baseline failed: Admin access required', 'error')
       }
     } catch {
-      const val = filterType === 'group' ? selectedGroup : filterType === 'faculty' ? selectedFaculty : selectedRoom
-      fetchSchedule(filterType, val, 'baseline')
-      showToast('Restored baseline in local mode.', 'info')
+      showToast('Error communicating with server.', 'error')
     }
   }
 
@@ -858,7 +869,13 @@ export default function CampusManager() {
 
   const handleRevertDisruption = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/disruption/revert`, { method: 'POST' })
+      const token = localStorage.getItem('auth_token')
+      const res = await fetch(`${API_BASE}/api/disruption/revert`, {
+        method: 'POST',
+        headers: {
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        }
+      })
       if (res.ok) {
         setActiveView('baseline')
         localStorage.setItem('active_view', 'baseline')
@@ -869,15 +886,13 @@ export default function CampusManager() {
         setDisruptionPreview(false)
         setDisruptionDecisions({})
         setDisruptionMoves(defaultMoves)
+        showToast('Timetable reverted to baseline schedule.', 'success')
+      } else {
+        const err = await res.json().catch(() => ({}))
+        showToast(err.detail || 'Revert failed: Admin access required', 'error')
       }
     } catch {
-      setActiveView('baseline')
-      localStorage.setItem('active_view', 'baseline')
-      setNotice('Disrupted changes reverted to baseline.')
-      fetchDisruptionHistory()
-      setDisruptionPreview(false)
-      setDisruptionDecisions({})
-      setDisruptionMoves(defaultMoves)
+      showToast('Error communicating with server.', 'error')
     }
   }
 
@@ -941,7 +956,13 @@ export default function CampusManager() {
 
   const handleRollback = async (logId: number) => {
     try {
-      const res = await fetch(`${API_BASE}/api/disruption/rollback/${logId}`, { method: 'POST' })
+      const token = localStorage.getItem('auth_token')
+      const res = await fetch(`${API_BASE}/api/disruption/rollback/${logId}`, {
+        method: 'POST',
+        headers: {
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        }
+      })
       if (res.ok) {
         const data = await res.json()
         setActiveView(data.active_view)
@@ -953,8 +974,14 @@ export default function CampusManager() {
         setDisruptionPreview(false)
         setDisruptionDecisions({})
         setDisruptionMoves(defaultMoves)
+        showToast(`Rolled back schedule to snapshot #${logId}.`, 'success')
+      } else {
+        const err = await res.json().catch(() => ({}))
+        showToast(err.detail || 'Rollback failed: Admin access required', 'error')
       }
-    } catch {}
+    } catch {
+      showToast('Error communicating with server.', 'error')
+    }
   }
 
   const handleAskAiExplain = async () => {
@@ -1153,25 +1180,28 @@ export default function CampusManager() {
 
         {/* Directly underneath the AI booking assistant button - stays in sequence during scroll */}
         <div className="mt-4 pt-3 border-t border-timetable-grid/50 flex flex-col gap-2 shrink-0">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleClearData}
-              className="flex-1 flex items-center justify-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-600 hover:text-white transition shadow-sm"
-              title="Clear all current data from all tables"
-            >
-              <RotateCcw className="size-3.5" />
-              <span>Clear Data</span>
-            </button>
+          {/* Admin only: Clear and Restore controls */}
+          {currentUser?.role === 'ADMIN' && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleClearData}
+                className="flex-1 flex items-center justify-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-600 hover:text-white transition shadow-sm"
+                title="Clear all current data from all tables"
+              >
+                <RotateCcw className="size-3.5" />
+                <span>Clear Data</span>
+              </button>
 
-            <button
-              onClick={handleRestoreBaseline}
-              className="flex items-center justify-center gap-1 rounded-xl border border-timetable-grid bg-secondary/80 px-2.5 py-2 text-xs font-medium text-foreground hover:bg-accent transition shadow-sm"
-              title="Restore baseline schedule dataset"
-            >
-              <History className="size-3.5 text-muted-foreground" />
-              <span>Restore</span>
-            </button>
-          </div>
+              <button
+                onClick={handleRestoreBaseline}
+                className="flex items-center justify-center gap-1 rounded-xl border border-timetable-grid bg-secondary/80 px-2.5 py-2 text-xs font-medium text-foreground hover:bg-accent transition shadow-sm"
+                title="Restore baseline schedule dataset"
+              >
+                <History className="size-3.5 text-muted-foreground" />
+                <span>Restore</span>
+              </button>
+            </div>
+          )}
 
           {/* User Account Card */}
           <div className="rounded-xl border border-timetable-grid bg-card/80 p-3 shadow-sm">
@@ -1363,6 +1393,7 @@ export default function CampusManager() {
               availableRooms={availableRooms}
               onUploadDisruption={handleUploadDisruption}
               isLoading={disruptionLoading}
+              isAdmin={currentUser?.role === 'ADMIN'}
             />
           )}
           {activeTab === 4 && (
@@ -1948,7 +1979,8 @@ function Disruption({
   onRollback,
   availableRooms,
   onUploadDisruption,
-  isLoading
+  isLoading,
+  isAdmin
 }: {
   preview: boolean
   moves: string[][]
@@ -1964,6 +1996,7 @@ function Disruption({
   availableRooms: string[]
   onUploadDisruption?: (e: React.ChangeEvent<HTMLInputElement>) => void
   isLoading?: boolean
+  isAdmin?: boolean
 }) {
   const [activeSubTab, setActiveSubTab] = useState<'simulation' | 'history'>('simulation')
   const [busy, setBusy] = useState(false)
@@ -2306,13 +2339,15 @@ function Disruption({
                       {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
                       Re-solve with Custom Decisions
                     </button>
-                    <button
-                      onClick={wrappedRevert}
-                      disabled={busy}
-                      className="rounded-full border border-timetable-grid bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition disabled:opacity-50"
-                    >
-                      Revert to Baseline Schedule
-                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={wrappedRevert}
+                        disabled={busy}
+                        className="rounded-full border border-timetable-grid bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition disabled:opacity-50"
+                      >
+                        Revert to Baseline Schedule
+                      </button>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -2436,15 +2471,19 @@ function Disruption({
                     </div>
 
                     <div className="shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => wrappedRollback(item.id)}
-                        disabled={busy}
-                        className="flex items-center gap-1.5 rounded-full border border-timetable-grid bg-secondary px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-ink hover:text-ink-foreground transition disabled:opacity-50"
-                      >
-                        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <History className="size-3.5" />}
-                        Rollback to this state
-                      </button>
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => wrappedRollback(item.id)}
+                          disabled={busy}
+                          className="flex items-center gap-1.5 rounded-full border border-timetable-grid bg-secondary px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-ink hover:text-ink-foreground transition disabled:opacity-50"
+                        >
+                          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <History className="size-3.5" />}
+                          Rollback to this state
+                        </button>
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground italic px-2 py-1">Admin rollback only</span>
+                      )}
                     </div>
                   </div>
                 )

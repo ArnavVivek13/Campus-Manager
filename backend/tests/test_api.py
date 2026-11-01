@@ -148,7 +148,32 @@ def test_restore_and_clear_data():
     token = get_admin_token()
     headers = {"Authorization": f"Bearer {token}"}
 
-    # Restore baseline
+    # 1. Non-admin forbidden from restore baseline and clear data
+    import uuid
+    uid = uuid.uuid4().hex[:6]
+    student_email = f"student.test.{uid}@cit.edu"
+    client.post("/api/admin/users", json={
+        "email": student_email,
+        "full_name": "Test Student RBAC",
+        "role": "STUDENT",
+        "department": "CSE",
+        "password": "Password@123"
+    }, headers=headers)
+    st_login = client.post("/api/auth/login", json={"email": student_email, "password": "Password@123"})
+    assert st_login.status_code == 200
+    st_token = st_login.json()["access_token"]
+    st_headers = {"Authorization": f"Bearer {st_token}"}
+
+    # Non-admin forbidden checks
+    assert client.post("/api/admin/clear-data", headers=st_headers).status_code == 403
+    assert client.post("/api/admin/restore-baseline", headers=st_headers).status_code == 403
+    assert client.post("/api/disruption/revert", headers=st_headers).status_code == 403
+    assert client.post("/api/disruption/rollback/1", headers=st_headers).status_code == 403
+    # Unauthenticated forbidden checks
+    assert client.post("/api/admin/clear-data").status_code == 401
+    assert client.post("/api/admin/restore-baseline").status_code == 401
+
+    # 2. Admin successfully restores baseline
     res = client.post("/api/admin/restore-baseline", headers=headers)
     assert res.status_code == 200
 
@@ -163,7 +188,7 @@ def test_restore_and_clear_data():
     assert "attachment; filename=\"schedule.json\"" in export_res.headers.get("content-disposition", "")
     assert "sessions" in export_res.json()
 
-    # Clear data
+    # 3. Admin successfully clears data
     clear_res = client.post("/api/admin/clear-data", headers=headers)
     assert clear_res.status_code == 200
 
