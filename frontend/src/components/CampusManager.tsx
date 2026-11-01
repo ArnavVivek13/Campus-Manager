@@ -676,6 +676,7 @@ export default function CampusManager() {
     const formData = new FormData()
     formData.append('file', file)
     try {
+      // Step 1: Upload file and start background solver job
       const res = await fetch(`${API_BASE}/api/admin/load-dataset`, {
         method: 'POST',
         body: formData
@@ -684,13 +685,53 @@ export default function CampusManager() {
       if (!res.ok) {
         throw new Error(data.detail || 'Failed to load dataset.')
       }
-      setNotice(`${data.message || 'Dataset loaded.'} Timetable verified with 0 hard violations.`)
-      showToast(`Dataset loaded & solved clash-free! (${data.total_sessions || ''} sessions)`, 'success')
-      const val = filterType === 'group' ? selectedGroup : filterType === 'faculty' ? selectedFaculty : selectedRoom
-      fetchSchedule(filterType, val, 'baseline')
-      fetchExams()
-      fetchBookings()
-      fetchMetadata()
+
+      // Step 2: If the backend returned a job_id, poll for completion
+      if (data.job_id) {
+        showToast('Dataset uploaded — solver is running...', 'info')
+        const jobId = data.job_id
+        let attempts = 0
+        const maxAttempts = 300 // 5 minutes at 1s intervals
+        while (attempts < maxAttempts) {
+          await new Promise(r => setTimeout(r, 2000))
+          attempts++
+          try {
+            const pollRes = await fetch(`${API_BASE}/api/admin/load-dataset/status/${jobId}`)
+            const pollData = await pollRes.json()
+            if (pollData.status === 'completed') {
+              const result = pollData.result || {}
+              setNotice(`${result.message || 'Dataset loaded.'} Timetable verified with 0 hard violations.`)
+              showToast(`Dataset solved clash-free! (${result.metrics?.sessions_scheduled || ''} sessions)`, 'success')
+              const val = filterType === 'group' ? selectedGroup : filterType === 'faculty' ? selectedFaculty : selectedRoom
+              fetchSchedule(filterType, val, 'baseline')
+              fetchExams()
+              fetchBookings()
+              fetchMetadata()
+              break
+            } else if (pollData.status === 'failed') {
+              throw new Error(pollData.error || 'Solver failed.')
+            }
+            // Still processing — update toast with progress
+            if (pollData.progress) {
+              showToast(`Solving: ${pollData.progress}`, 'info')
+            }
+          } catch (pollErr: any) {
+            throw new Error(pollErr.message || 'Error polling solver status.')
+          }
+        }
+        if (attempts >= maxAttempts) {
+          throw new Error('Solver timed out after 5 minutes. The dataset may be too large for the current server.')
+        }
+      } else {
+        // Legacy synchronous response (backward compat)
+        setNotice(`${data.message || 'Dataset loaded.'} Timetable verified with 0 hard violations.`)
+        showToast(`Dataset loaded & solved clash-free! (${data.total_sessions || ''} sessions)`, 'success')
+        const val = filterType === 'group' ? selectedGroup : filterType === 'faculty' ? selectedFaculty : selectedRoom
+        fetchSchedule(filterType, val, 'baseline')
+        fetchExams()
+        fetchBookings()
+        fetchMetadata()
+      }
     } catch (err: any) {
       showToast(err.message || 'Error loading dataset file.', 'error')
     } finally {

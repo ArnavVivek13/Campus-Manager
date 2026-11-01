@@ -7,6 +7,8 @@ import copy
 import json
 import os
 import sys
+import threading
+import uuid
 from typing import Dict, Any, Optional, List
 from dotenv import load_dotenv
 
@@ -912,11 +914,96 @@ def export_schedule_endpoint():
     )
 
 
+# ---- Background Solver Job Registry ----
+SOLVER_JOBS: Dict[str, Dict[str, Any]] = {}
+
+def _run_solver_job(job_id: str, new_data: dict):
+    """Background thread: solves timetable, exams, bookings and updates state + DB."""
+    try:
+        SOLVER_JOBS[job_id]["progress"] = "Solving timetable..."
+
+        # Solve Master Timetable (fast_mode skips soft-penalty optimization for speed)
+        t_solver = TimetableSolver(new_data, time_limit_seconds=600.0, num_workers=0, fast_mode=True)
+        t_res = t_solver.solve()
+        if not t_res["solvable"]:
+            SOLVER_JOBS[job_id]["status"] = "failed"
+            SOLVER_JOBS[job_id]["error"] = f"Dataset is unsolvable: {t_res.get('conflicts')}"
+            return
+        assign = t_res["assignment"]
+
+        SOLVER_JOBS[job_id]["progress"] = "Solving exam schedule..."
+
+        # Solve Exams
+        e_solver = ExamSolver(new_data, time_limit_seconds=120.0, num_workers=0)
+        exams = e_solver.solve()
+
+        SOLVER_JOBS[job_id]["progress"] = "Solving fest bookings..."
+
+        # Solve Bookings
+        b_solver = BookingSolver(new_data, assign)
+        fest_week = b_solver.solve()
+
+        new_schedule = {
+            "team": "Zephyr",
+            "dataset_id": new_data["dataset_id"],
+            "sessions": [
+                {
+                    "session_id": sid,
+                    "day": val["day"],
+                    "start_period": val["start_period"],
+                    "room_id": val["room_id"]
+                }
+                for sid, val in assign.items()
+            ],
+            "fest_week": fest_week,
+            "exams": exams
+        }
+
+        SOLVER_JOBS[job_id]["progress"] = "Syncing to database..."
+
+        # Sync to SQL DBMS
+        db = SessionLocal()
+        try:
+            sync_dataset_to_db(db, new_data, set_as_active=True)
+            sync_schedule_to_db(db, new_schedule, version_tag="baseline", set_as_active=True)
+        finally:
+            db.close()
+
+        # Update in-memory state
+        STATE["data"] = copy.deepcopy(new_data)
+        STATE["baseline_data"] = copy.deepcopy(new_data)
+        STATE["schedule"] = copy.deepcopy(new_schedule)
+        STATE["baseline_schedule"] = copy.deepcopy(new_schedule)
+        STATE["active_view"] = "baseline"
+        STATE["disruption_pending"] = None
+        STATE["disruption_diff"] = None
+
+        # Write to exports
+        os.makedirs("exports", exist_ok=True)
+        with open(SCHEDULE_PATH, "w", encoding="utf-8") as f:
+            json.dump(new_schedule, f, indent=2)
+
+        SOLVER_JOBS[job_id]["status"] = "completed"
+        SOLVER_JOBS[job_id]["progress"] = "Done"
+        SOLVER_JOBS[job_id]["result"] = {
+            "message": f"Dataset '{new_data['dataset_id']}' loaded and solved successfully.",
+            "metrics": {
+                "sessions_scheduled": len(new_schedule["sessions"]),
+                "exams_scheduled": len(new_schedule["exams"]),
+                "bookings_approved": sum(1 for b in fest_week.get("bookings", []) if b.get("status") == "approved")
+            }
+        }
+    except Exception as e:
+        SOLVER_JOBS[job_id]["status"] = "failed"
+        SOLVER_JOBS[job_id]["error"] = str(e)
+
+
 @app.post("/api/admin/load-dataset")
 async def load_dataset_endpoint(file: UploadFile = File(None), db: Session = Depends(get_db)):
     """
     Allows Admin to upload a new dataset JSON file conforming to starter pack schema.
-    Validates, re-solves clash-free timetable, exams, and bookings, and updates live state and SQL DBMS.
+    Validates the JSON structure, then kicks off a background solver job and returns immediately.
+    Poll GET /api/admin/load-dataset/status/{job_id} to track progress.
     """
     if not file:
         raise HTTPException(status_code=400, detail="No dataset file provided.")
@@ -932,82 +1019,28 @@ async def load_dataset_endpoint(file: UploadFile = File(None), db: Session = Dep
         if k not in new_data:
             raise HTTPException(status_code=422, detail=f"Missing required dataset section: '{k}'")
 
-    try:
-        new_schedule = None
+    # Create a background solver job
+    job_id = str(uuid.uuid4())[:8]
+    SOLVER_JOBS[job_id] = {
+        "status": "processing",
+        "progress": "Validating dataset...",
+        "error": None,
+        "result": None
+    }
 
-        # Check if a verified pre-computed schedule matches this dataset
-        if os.path.exists("exports/schedule.json"):
-            try:
-                with open("exports/schedule.json", "r") as f:
-                    pre_sched = json.load(f)
-                if pre_sched.get("dataset_id") == new_data.get("dataset_id") and len(pre_sched.get("sessions", [])) > 0:
-                    new_schedule = pre_sched
-            except Exception:
-                new_schedule = None
+    thread = threading.Thread(target=_run_solver_job, args=(job_id, new_data), daemon=True)
+    thread.start()
 
-        if not new_schedule:
-            # Solve Master Timetable (Fast-Feasible mode: finds 0-hard-violation valid schedule)
-            t_solver = TimetableSolver(new_data, time_limit_seconds=60.0, num_workers=0, fast_mode=True)
-            t_res = t_solver.solve()
-            if not t_res["solvable"]:
-                raise HTTPException(status_code=422, detail=f"Dataset is unsolvable with 0 hard violations: {t_res.get('conflicts')}")
-            assign = t_res["assignment"]
+    return {"status": "processing", "job_id": job_id, "message": "Solver started in background. Poll /api/admin/load-dataset/status/{job_id} for progress."}
 
-            # Solve Exams
-            e_solver = ExamSolver(new_data, time_limit_seconds=15.0, num_workers=0)
-            exams = e_solver.solve()
 
-            # Solve Bookings
-            b_solver = BookingSolver(new_data, assign)
-            fest_week = b_solver.solve()
-
-            new_schedule = {
-                "team": "Zephyr",
-                "dataset_id": new_data["dataset_id"],
-                "sessions": [
-                    {
-                        "session_id": sid,
-                        "day": val["day"],
-                        "start_period": val["start_period"],
-                        "room_id": val["room_id"]
-                    }
-                    for sid, val in assign.items()
-                ],
-                "fest_week": fest_week,
-                "exams": exams
-            }
-
-        # 1. Atomically sync full dataset entities and solved schedule into SQL DBMS
-        sync_dataset_to_db(db, new_data, set_as_active=True)
-        sync_schedule_to_db(db, new_schedule, version_tag="baseline", set_as_active=True)
-
-        # 2. Update in-memory state
-        STATE["data"] = copy.deepcopy(new_data)
-        STATE["baseline_data"] = copy.deepcopy(new_data)
-        STATE["schedule"] = copy.deepcopy(new_schedule)
-        STATE["baseline_schedule"] = copy.deepcopy(new_schedule)
-        STATE["active_view"] = "baseline"
-        STATE["disruption_pending"] = None
-        STATE["disruption_diff"] = None
-
-        # Write to exports
-        os.makedirs("exports", exist_ok=True)
-        with open(SCHEDULE_PATH, "w", encoding="utf-8") as f:
-            json.dump(new_schedule, f, indent=2)
-
-        return {
-            "status": "success",
-            "message": f"Dataset '{new_data['dataset_id']}' loaded and solved successfully.",
-            "metrics": {
-                "sessions_scheduled": len(new_schedule["sessions"]),
-                "exams_scheduled": len(new_schedule["exams"]),
-                "bookings_approved": sum(1 for b in fest_week.get("bookings", []) if b.get("status") == "approved")
-            }
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Solver execution failed: {str(e)}")
+@app.get("/api/admin/load-dataset/status/{job_id}")
+def get_solver_job_status(job_id: str):
+    """Poll this endpoint to check the status of a background solver job."""
+    job = SOLVER_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return job
 
 
 @app.get("/api/validator/report")
